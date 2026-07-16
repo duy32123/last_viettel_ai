@@ -1,0 +1,23 @@
+{
+  "status": "not_run_no_cuda_or_training_dependencies_in_local_environment",
+  "pilot_training_completed": false,
+  "model_name": "FacebookAI/xlm-roberta-large",
+  "config": "configs/train_ner.pilot.yaml",
+  "official_evaluation": false,
+  "metrics": null,
+  "best_checkpoint": null,
+  "runtime_seconds": null,
+  "gpu": null,
+  "peak_vram_bytes": null,
+  "blockers": [
+    "local environment has no verified CUDA GPU preflight",
+    "torch/transformers/accelerate integration dependencies are not installed here",
+    "full training remains blocked until real_records > 0 and human-approved gold dev exists"
+  ],
+  "commands_for_gpu_machine": [
+    "python -m pip install -r requirements-train.txt",
+    "python scripts/gpu_preflight.py --out artifacts/gpu_preflight.json",
+    "python -m pytest -q -m integration",
+    "python scripts/train_ner.py --config configs/train_ner.pilot.yaml"
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "documents_by_source_split": {
+    "synthetic_v1::dev": 4,
+    "synthetic_v1::test": 4,
+    "synthetic_v1::train": 12
+  },
+  "documents_by_split": {
+    "dev": 4,
+    "test": 4,
+    "train": 12
+  },
+  "sources": {
+    "synthetic_v1": 20
+  },
+  "entities_by_type": {
+    "CHẨN_ĐOÁN": 9,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 5,
+    "THUỐC": 6,
+    "TRIỆU_CHỨNG": 26,
+    "TÊN_XÉT_NGHIỆM": 5
+  },
+  "assertion_distribution": {
+    "isFamily": 3,
+    "isHistorical": 4,
+    "isNegated": 3
+  },
+  "duplicate_records": 0,
+  "duplicate_rate": 0.0,
+  "unmapped_ignore_counts": {},
+  "unmapped_ignore_rate": 0.0,
+  "candidate_coverage": {
+    "with_candidate": 15,
+    "without_candidate": 36
+  },
+  "candidate_coverage_rate": 0.29411764705882354,
+  "verified_candidate_counts": {
+    "unverified": 15
+  },
+  "template_families_by_split": {
+    "dev": 4,
+    "test": 4,
+    "train": 5
+  },
+  "train_entity_types": {
+    "CHẨN_ĐOÁN": 4,
+    "TRIỆU_CHỨNG": 15,
+    "TÊN_XÉT_NGHIỆM": 2,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 2,
+    "THUỐC": 5
+  },
+  "dev_entity_types": {
+    "CHẨN_ĐOÁN": 3,
+    "THUỐC": 1,
+    "TRIỆU_CHỨNG": 4,
+    "TÊN_XÉT_NGHIỆM": 1,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 1
+  },
+  "dev_gold_evaluation": {
+    "not_gold": 4
+  },
+  "synthetic_test_not_gold_records": 4
+}

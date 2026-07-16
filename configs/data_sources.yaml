@@ -1,8 +1,7 @@
 {
   "output_dir": "data/processed/kb",
   "sources": [
-    {"name":"organizer_fixture_icd","kind":"icd_csv","terminology":"ICD-10","version":"fixture-2026","path":"tests/fixtures/kb/icd_fixture.csv","verified":true,"url":"local fixture","license":"test-only"},
-    {"name":"rxnorm_fixture","kind":"rxnorm_csv","version":"fixture-2026","path":"tests/fixtures/kb/rxnorm_fixture.csv","verified":true,"url":"local fixture","license":"test-only"},
+    {"name":"official_icd_release","kind":"icd_csv","terminology":"ICD-10","version":"user-provided","path":"data/raw/icd10.csv","verified":true,"url":"user-provided official ICD-10 release","license":"provide an official licensed release before building production KB"},
     {"name":"official_rxnorm_release","kind":"rxnorm_csv","version":"user-provided","path":"data/raw/rxnorm.csv","verified":true,"url":"https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html","license":"requires UMLS/RxNorm access where applicable; set RXNORM_API_KEY if needed"}
   ]
 }

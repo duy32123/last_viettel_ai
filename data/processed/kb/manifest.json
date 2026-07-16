@@ -1,27 +1,14 @@
 [
   {
-    "name": "organizer_fixture_icd",
+    "name": "official_icd_release",
     "kind": "icd_csv",
     "terminology": "ICD-10",
-    "version": "fixture-2026",
-    "path": "tests/fixtures/kb/icd_fixture.csv",
+    "version": "user-provided",
+    "path": "data/raw/icd10.csv",
     "verified": true,
-    "url": "local fixture",
-    "license": "test-only",
-    "status": "loaded",
-    "checksum_sha256": "755f4e50a39ef1ecdca0c27fc13ededa778a947ed222e81234f51405b1485937",
-    "fetched_at": "2026-07-16"
-  },
-  {
-    "name": "rxnorm_fixture",
-    "kind": "rxnorm_csv",
-    "version": "fixture-2026",
-    "path": "tests/fixtures/kb/rxnorm_fixture.csv",
-    "verified": true,
-    "url": "local fixture",
-    "license": "test-only",
-    "status": "loaded",
-    "checksum_sha256": "00e2330c0e73a096ea62f824ffdafb694eef895907b11b8ad258a45787d8f6d4",
+    "url": "user-provided official ICD-10 release",
+    "license": "provide an official licensed release before building production KB",
+    "status": "skipped_missing",
     "fetched_at": "2026-07-16"
   },
   {
