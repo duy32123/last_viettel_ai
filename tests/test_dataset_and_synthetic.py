@@ -51,6 +51,15 @@ def test_synthetic_template_expected_entities_incomplete_labels():
         "resp_labs": {("ho khan","TRIỆU_CHỨNG"),("sốt","TRIỆU_CHỨNG"),("glucose","TÊN_XÉT_NGHIỆM"),("7,2 mmol/l","KẾT_QUẢ_XÉT_NGHIỆM")},
         "mixed_followup": {("mệt","TRIỆU_CHỨNG"),("sốt","TRIỆU_CHỨNG"),("đái tháo đường","CHẨN_ĐOÁN")},
         "rx_change": {("amlodipine","THUỐC"),("ho khan","TRIỆU_CHỨNG")},
+        "abbrev_vitals": {("khó thở","TRIỆU_CHỨNG"),("glucose","TÊN_XÉT_NGHIỆM"),("8.1 mmol/L","KẾT_QUẢ_XÉT_NGHIỆM")},
+        "no_diacritics": {("ho khan","TRIỆU_CHỨNG"),("met","TRIỆU_CHỨNG")},
+        "typo_controlled": {("sôt","TRIỆU_CHỨNG"),("ho khan","TRIỆU_CHỨNG")},
+        "case_punct": {("tăng huyết áp","CHẨN_ĐOÁN"),("MỆT","TRIỆU_CHỨNG")},
+        "dose_route": {("amlodipine 5mg uống sáng","THUỐC"),("đau ngực","TRIỆU_CHỨNG")},
+        "neg_scope": {("sốt","TRIỆU_CHỨNG"),("ho khan","TRIỆU_CHỨNG"),("mệt","TRIỆU_CHỨNG")},
+        "multi_problem": {("đái tháo đường","CHẨN_ĐOÁN"),("tăng huyết áp","CHẨN_ĐOÁN"),("WBC","TÊN_XÉT_NGHIỆM"),("10 G/L","KẾT_QUẢ_XÉT_NGHIỆM")},
+        "family_history": {("tăng huyết áp","CHẨN_ĐOÁN"),("đái tháo đường","CHẨN_ĐOÁN")},
+        "lab_panel": {("glucose","TÊN_XÉT_NGHIỆM"),("6,4 mmol/l","KẾT_QUẢ_XÉT_NGHIỆM"),("WBC","TÊN_XÉT_NGHIỆM"),("7 G/L","KẾT_QUẢ_XÉT_NGHIỆM")},
     }
     for i,family in enumerate(TEMPLATE_FAMILIES):
         assert entity_set(sample(i, family)) == expected[family]
