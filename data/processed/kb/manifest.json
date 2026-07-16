@@ -1,0 +1,38 @@
+[
+  {
+    "name": "organizer_fixture_icd",
+    "kind": "icd_csv",
+    "terminology": "ICD-10",
+    "version": "fixture-2026",
+    "path": "tests/fixtures/kb/icd_fixture.csv",
+    "verified": true,
+    "url": "local fixture",
+    "license": "test-only",
+    "status": "loaded",
+    "checksum_sha256": "755f4e50a39ef1ecdca0c27fc13ededa778a947ed222e81234f51405b1485937",
+    "fetched_at": "2026-07-16"
+  },
+  {
+    "name": "rxnorm_fixture",
+    "kind": "rxnorm_csv",
+    "version": "fixture-2026",
+    "path": "tests/fixtures/kb/rxnorm_fixture.csv",
+    "verified": true,
+    "url": "local fixture",
+    "license": "test-only",
+    "status": "loaded",
+    "checksum_sha256": "00e2330c0e73a096ea62f824ffdafb694eef895907b11b8ad258a45787d8f6d4",
+    "fetched_at": "2026-07-16"
+  },
+  {
+    "name": "official_rxnorm_release",
+    "kind": "rxnorm_csv",
+    "version": "user-provided",
+    "path": "data/raw/rxnorm.csv",
+    "verified": true,
+    "url": "https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html",
+    "license": "requires UMLS/RxNorm access where applicable; set RXNORM_API_KEY if needed",
+    "status": "skipped_missing",
+    "fetched_at": "2026-07-16"
+  }
+]

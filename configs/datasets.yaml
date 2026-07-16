@@ -1,0 +1,8 @@
+{
+  "output": "data/processed/external.jsonl",
+  "datasets": [
+    {"name":"PhoNER_COVID19","official_url":"https://github.com/VinAIResearch/PhoNER_COVID19","license":"research dataset; verify upstream license before training","domain":"Vietnamese COVID-19 news/medical text","labels":["SYMPTOM_AND_DISEASE","ORGANIZATION","LOCATION","DATE","AGE","GENDER","PATIENT_ID","JOB"],"mapping":{"SYMPTOM_AND_DISEASE":"TRIỆU_CHỨNG","ORGANIZATION":"IGNORE","LOCATION":"IGNORE","DATE":"IGNORE","AGE":"IGNORE","GENDER":"IGNORE","PATIENT_ID":"IGNORE","JOB":"IGNORE"},"fixture_path":"tests/fixtures/datasets/phoner_fixture.jsonl","split":"train"},
+    {"name":"VietMed-NER_MultiMed","official_url":"https://github.com/trunghlt/MultiMed","license":"check upstream access conditions before download","domain":"Vietnamese medical NER","labels":[]},
+    {"name":"ViMQ","official_url":"https://github.com/aqquang/ViMQ","license":"check upstream access conditions before download","domain":"Vietnamese medical questions","labels":[]}
+  ]
+}

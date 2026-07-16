@@ -1,0 +1,1 @@
+{"id":"p1","text":"Bệnh nhân sốt và ho.","entities":[{"id":"E1","start":10,"end":13,"text":"sốt","type":"TRIỆU_CHỨNG","assertions":[],"candidates":[]},{"id":"E2","start":17,"end":19,"text":"ho","type":"TRIỆU_CHỨNG","assertions":[],"candidates":[]}],"relations":[],"metadata":{}}
