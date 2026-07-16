@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, re, hashlib
+import json, re, hashlib, os
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,29 +34,44 @@ class QwenBackend(Protocol):
 
 class TransformersQwenBackend:
     def __init__(self, model_name: str=DEFAULT_QWEN_MODEL, device: str="auto", load_in_4bit: bool=False):
+        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
         self.model_name=model_name; self.device=device
         kwargs={"device_map": device if device != "cpu" else None}
-        if load_in_4bit: kwargs["load_in_4bit"]=True
+        if load_in_4bit:
+            try:
+                import bitsandbytes  # noqa: F401
+                from transformers import BitsAndBytesConfig
+            except ImportError as exc:
+                raise RuntimeError("--qwen-load-in-4bit requires bitsandbytes to be installed") from exc
+            kwargs["quantization_config"]=BitsAndBytesConfig(load_in_4bit=True)
+        else:
+            if torch.cuda.is_available():
+                kwargs["torch_dtype"]=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         self.tokenizer=AutoTokenizer.from_pretrained(model_name)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token=self.tokenizer.eos_token
         self.model=AutoModelForCausalLM.from_pretrained(model_name, **{k:v for k,v in kwargs.items() if v is not None})
         if device == "cpu": self.model.to("cpu")
         self.model.eval()
 
     def classify_batch(self, candidates: list[dict[str, Any]], prompt_version: str) -> list[str]:
-        labels=[]
+        prompts=[]
         for cand in candidates:
-            prompt=(
+            prompts.append(
                 f"Prompt {prompt_version}. Classify ONLY this exact medical NER span. "
                 "Return one label exactly from: TRIỆU_CHỨNG, CHẨN_ĐOÁN, TÊN_XÉT_NGHIỆM, "
                 "KẾT_QUẢ_XÉT_NGHIỆM, THUỐC, IGNORE. Do not change offsets or text.\n"
                 f"Context: {cand['context']}\nMention: {cand['mention']}\nSource label: {cand['source_label']}\nLabel:"
             )
-            inputs=self.tokenizer(prompt, return_tensors="pt")
-            dev=next(self.model.parameters()).device
-            inputs={k:v.to(dev) for k,v in inputs.items()}
-            out=self.model.generate(**inputs, max_new_tokens=16, do_sample=False)
-            gen=self.tokenizer.decode(out[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True).strip()
+        inputs=self.tokenizer(prompts, padding=True, truncation=True, return_tensors="pt")
+        dev=next(self.model.parameters()).device
+        inputs={k:v.to(dev) for k,v in inputs.items()}
+        out=self.model.generate(**inputs, max_new_tokens=16, do_sample=False)
+        labels=[]
+        for i, seq in enumerate(out):
+            prompt_len=int(inputs['attention_mask'][i].sum().item())
+            gen=self.tokenizer.decode(seq[prompt_len:], skip_special_tokens=True).strip()
             labels.append(_parse_qwen_label(gen))
         return labels
 
@@ -126,19 +141,13 @@ def _load_cache(path: Path|None) -> dict[str,str]:
 def _save_cache(path: Path|None, cache: dict[str,str]) -> None:
     if not path: return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding='utf-8')
+    tmp=path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding='utf-8')
+    os.replace(tmp, path)
 
-def _qwen_decision(cand: dict[str,Any], backend: QwenBackend, cache: dict[str,str], cache_path: Path|None) -> WeakDecision:
+def _decision_from_qwen_labels(cand: dict[str,Any], labels: list[str], model_name: str) -> WeakDecision:
     if not _valid_span(cand['text'], cand['start'], cand['end'], cand['mention']):
         return WeakDecision("REJECT",0.0,"qwen_reject","invalid_offset_after_qwen")
-    labels=[]; model_name=getattr(backend, 'model_name', DEFAULT_QWEN_MODEL)
-    for prompt_version in QWEN_PROMPT_VERSIONS:
-        key=_qwen_cache_key(cand, prompt_version, model_name)
-        if key not in cache:
-            label=backend.classify_batch([cand], prompt_version)[0]
-            cache[key]=label if label in QWEN_LABELS else "IGNORE"
-            _save_cache(cache_path, cache)
-        labels.append(cache[key])
     agree=labels[0] == labels[1]
     meta={'qwen_model':model_name,'qwen_prompt_versions':list(QWEN_PROMPT_VERSIONS),'qwen_passes':labels,'qwen_agreement':agree,'provenance':'silver_qwen_two_pass'}
     if not agree:
@@ -147,20 +156,63 @@ def _qwen_decision(cand: dict[str,Any], backend: QwenBackend, cache: dict[str,st
         return WeakDecision("IGNORE",0.90,"qwen_two_pass","qwen_ignore",meta)
     return WeakDecision(labels[0],0.90,"qwen_two_pass","two_pass_agreement",meta)
 
-def weak_label_records(rows: list[dict[str,Any]], min_confidence: float=0.9, qwen_enabled: bool=False, qwen_backend: QwenBackend|None=None, qwen_cache: Path|None=None, qwen_max_candidates: int|None=None) -> tuple[list[dict], list[dict], dict]:
+def _run_qwen_batches(candidates: list[dict[str,Any]], backend: QwenBackend, cache: dict[str,str], cache_path: Path|None, batch_size: int) -> tuple[dict[str,WeakDecision], Counter]:
+    stats=Counter(); decisions={}; model_name=getattr(backend, 'model_name', DEFAULT_QWEN_MODEL); batch_size=max(1, int(batch_size or 1))
+    for prompt_version in QWEN_PROMPT_VERSIONS:
+        missing=[]
+        for cand in candidates:
+            key=_qwen_cache_key(cand, prompt_version, model_name)
+            if key in cache:
+                stats['qwen_cache_hits']+=1
+            else:
+                missing.append(cand)
+        for i in range(0, len(missing), batch_size):
+            batch=missing[i:i+batch_size]
+            if not batch: continue
+            labels=backend.classify_batch(batch, prompt_version)
+            stats['qwen_batches']+=1; stats['qwen_processed']+=len(batch)
+            stats['effective_batch_size_total']+=len(batch); stats['effective_batch_size_count']+=1
+            for cand,label in zip(batch, labels):
+                cache[_qwen_cache_key(cand, prompt_version, model_name)]=label if label in QWEN_LABELS else "IGNORE"
+            _save_cache(cache_path, cache)
+    for cand in candidates:
+        labels=[cache[_qwen_cache_key(cand, pv, model_name)] for pv in QWEN_PROMPT_VERSIONS]
+        decisions[cand['candidate_id']]=_decision_from_qwen_labels(cand, labels, model_name)
+    return decisions, stats
+
+def weak_label_records(rows: list[dict[str,Any]], min_confidence: float=0.9, qwen_enabled: bool=False, qwen_backend: QwenBackend|None=None, qwen_cache: Path|None=None, qwen_max_candidates: int|None=None, qwen_batch_size: int=4) -> tuple[list[dict], list[dict], dict]:
     accepted=[]; review=[]
     report={'counts_by_type':Counter(),'entity_count_by_type':Counter(),'record_count_by_type':Counter(),'status_counts':Counter(),'source_label_confusion':Counter(),'confidence_distribution':Counter(),'method_confidence':Counter(),'qwen_agreement':Counter(),'unique_surface_forms_by_type':defaultdict(Counter),'top_mentions':defaultdict(Counter),'examples':defaultdict(list),'rejected':0,'invalid':0}
-    seen_hash=set(); qwen_used=0; cache=_load_cache(qwen_cache)
-    for rec in rows:
+    seen_hash=set(); cache=_load_cache(qwen_cache); qwen_decisions={}
+    if qwen_enabled and qwen_backend:
+        pending=[]
+        for rec_idx, rec in enumerate(rows):
+            text=rec['text']
+            for ent_idx, src in enumerate(_source_entities(rec)):
+                start,end=int(src['start']),int(src['end']); source_label=str(src.get('source_label',''))
+                if not _valid_span(text, start, end, src.get('text', text[start:end])):
+                    continue
+                decision=classify_candidate(text, source_label, start, end, qwen_enabled)
+                if decision.target == 'REVIEW':
+                    pending.append({'candidate_id':f"{rec_idx}:{ent_idx}",'text':text,'mention':text[start:end],'start':start,'end':end,'source_label':source_label,'context':context_window(text,start,end)})
+        if qwen_max_candidates and qwen_max_candidates > 0:
+            pending=pending[:qwen_max_candidates]
+        qwen_decisions, qstats=_run_qwen_batches(pending, qwen_backend, cache, qwen_cache, qwen_batch_size)
+        report['qwen_processed']=qstats.get('qwen_processed', 0)
+        report['qwen_cache_hits']=qstats.get('qwen_cache_hits', 0)
+        report['qwen_batches']=qstats.get('qwen_batches', 0)
+        if qstats.get('effective_batch_size_count'):
+            report['effective_batch_size']=qstats['effective_batch_size_total']/qstats['effective_batch_size_count']
+        else:
+            report['effective_batch_size']=0
+    for rec_idx, rec in enumerate(rows):
         text=rec['text']; out_ents=[]; review_ents=[]; rec_types=set()
-        for src in _source_entities(rec):
+        for ent_idx, src in enumerate(_source_entities(rec)):
             start,end=int(src['start']),int(src['end']); source_label=str(src.get('source_label',''))
             if not _valid_span(text, start, end, src.get('text', text[start:end])):
                 report['invalid']+=1; continue
             decision=classify_candidate(text, source_label, start, end, qwen_enabled)
-            if decision.target == 'REVIEW' and qwen_enabled and qwen_backend and (qwen_max_candidates is None or qwen_max_candidates <= 0 or qwen_used < qwen_max_candidates):
-                cand={'text':text,'mention':text[start:end],'start':start,'end':end,'source_label':source_label,'context':context_window(text,start,end)}
-                decision=_qwen_decision(cand, qwen_backend, cache, qwen_cache); qwen_used+=1
+            decision=qwen_decisions.get(f"{rec_idx}:{ent_idx}", decision)
             meta={'source_label':source_label,'weak_label_method':decision.method,'confidence':decision.confidence,'reason':decision.reason,'original_start':start,'original_end':end,'record_id':rec.get('id'), **decision.metadata}
             base={'id':'','start':start,'end':end,'text':text[start:end],'type':decision.target if decision.target in TARGET_TYPES else 'IGNORE','assertions':[],'candidates':[], 'metadata':meta}
             if decision.target in TARGET_TYPES and decision.confidence >= min_confidence:
@@ -198,6 +250,7 @@ def weak_label_records(rows: list[dict[str,Any]], min_confidence: float=0.9, qwe
     rep['top_mentions']={k:dict(v.most_common(10)) for k,v in report['top_mentions'].items()}
     rep['unique_surface_forms_by_type']={k:len(v) for k,v in report['unique_surface_forms_by_type'].items()}
     vals=list(rep['counts_by_type'].values()); rep['class_imbalance_ratio']=(max(vals)/min(vals)) if vals and min(vals)>0 else None
+    rep.setdefault('qwen_processed', 0); rep.setdefault('qwen_cache_hits', 0); rep.setdefault('qwen_batches', 0); rep.setdefault('effective_batch_size', 0)
     rep['invalid_offsets']=report['invalid']; rep['duplicate_leakage']='checked_train_only_no_dev_test_inputs'
     return accepted, review, rep
 
@@ -210,9 +263,9 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
     with path.open('w', encoding='utf-8') as fh:
         for r in rows: fh.write(json.dumps(r, ensure_ascii=False)+'\n')
 
-def build_weak_corpus(train_real: Path, synthetic_train: Path, out_dir: Path, annotation_dir: Path, min_confidence: float=0.9, qwen_enabled: bool=False, qwen_backend: QwenBackend|None=None, qwen_cache: Path|None=None, qwen_max_candidates: int|None=None) -> dict:
+def build_weak_corpus(train_real: Path, synthetic_train: Path, out_dir: Path, annotation_dir: Path, min_confidence: float=0.9, qwen_enabled: bool=False, qwen_backend: QwenBackend|None=None, qwen_cache: Path|None=None, qwen_max_candidates: int|None=None, qwen_batch_size: int=4) -> dict:
     rows=read_jsonl(train_real)
-    accepted, review, report=weak_label_records(rows, min_confidence, qwen_enabled, qwen_backend, qwen_cache, qwen_max_candidates)
+    accepted, review, report=weak_label_records(rows, min_confidence, qwen_enabled, qwen_backend, qwen_cache, qwen_max_candidates, qwen_batch_size)
     synth=read_jsonl(synthetic_train)
     for r in synth: r.setdefault('metadata',{})['synthetic']=True
     write_jsonl(out_dir/'train.silver.jsonl', accepted)

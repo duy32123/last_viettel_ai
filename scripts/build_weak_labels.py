@@ -8,4 +8,4 @@ if __name__ == '__main__':
     ns=p.parse_args(); backend=None
     if ns.qwen:
         backend=TransformersQwenBackend(ns.qwen_model, ns.qwen_device, ns.qwen_load_in_4bit)
-    print(json.dumps(build_weak_corpus(Path(ns.train_real), Path(ns.synthetic_train), Path(ns.out_dir), Path(ns.annotation_dir), ns.min_confidence, ns.qwen, backend, Path(ns.qwen_cache) if ns.qwen else None, ns.qwen_max_candidates), ensure_ascii=False, indent=2))
+    print(json.dumps(build_weak_corpus(Path(ns.train_real), Path(ns.synthetic_train), Path(ns.out_dir), Path(ns.annotation_dir), ns.min_confidence, ns.qwen, backend, Path(ns.qwen_cache) if ns.qwen else None, ns.qwen_max_candidates, ns.qwen_batch_size), ensure_ascii=False, indent=2))

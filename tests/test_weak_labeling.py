@@ -89,6 +89,19 @@ def test_qwen_backend_two_pass_accepts_only_agreement(tmp_path):
     assert report['qwen_agreement']['agree'] == 1
 
 
+def test_qwen_batch_size_groups_candidates(tmp_path):
+    rows=[rec(f'Bệnh nhân có biểu hiện lạ {i}.','biểu hiện lạ','DISEASESYMTOM',f'qb{i}') for i in range(10)]
+    backend=MockQwenBackend({'phase5d-weak-label-v1-a':'TRIỆU_CHỨNG','phase5d-weak-label-v1-b':'TRIỆU_CHỨNG'})
+    accepted, todo, report=weak_label_records(rows, qwen_enabled=True, qwen_backend=backend, qwen_cache=tmp_path/'qwen.json', qwen_batch_size=8)
+    batch_sizes=[len(candidates) for _, candidates in backend.calls]
+    assert batch_sizes == [8, 2, 8, 2]
+    assert report['qwen_batches'] == 4
+    assert report['qwen_processed'] == 20
+    assert report['effective_batch_size'] == 5
+    assert len(accepted) == 10 and not todo
+
+
+
 def test_qwen_disagreement_stays_pending():
     rows=[rec('Bệnh nhân có biểu hiện lạ.','biểu hiện lạ','DISEASESYMTOM','q2')]
     backend=MockQwenBackend({'phase5d-weak-label-v1-a':'TRIỆU_CHỨNG','phase5d-weak-label-v1-b':'CHẨN_ĐOÁN'})
