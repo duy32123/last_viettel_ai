@@ -14,3 +14,6 @@ model_weights/
 
 # Phase 5F generated corpus (rebuild locally after audit)
 data/processed/train.v2.balanced.jsonl
+
+# Phase 5G generated lab-pair repair corpus (rebuild locally after audit)
+data/processed/train.v2_1.lab_repair.jsonl

@@ -52,11 +52,11 @@ def test_targeted_synthetic_offsets_and_real_inventory_diversity():
 
 def test_result_entities_are_value_only_and_compatible_contexts():
     rows=generate_targeted_synthetic(BalanceConfig(min_entities_per_type=80))
-    test_names=['INR','HbA1c','HBA1C','CRP','glucose','WBC','creatinine','AST','ALT','hemoglobin','Hb']
-    result_rows=[r for r in rows if r['entities'][0]['type'] == 'KẾT_QUẢ_XÉT_NGHIỆM']
+    test_names=['INR','HbA1c','HBA1C','CRP','glucose','WBC','creatinine','AST','ALT','hemoglobin','Hb','ferritin','TSH','LDH','procalcitonin','D-dimer','albumin','natri','kali','ESR']
+    result_rows=[r for r in rows if any(e['type'] == 'KẾT_QUẢ_XÉT_NGHIỆM' for e in r['entities'])]
     assert result_rows
     for r in result_rows:
-        e=r['entities'][0]; cid=e['metadata']['concept_id']
+        e=next(ent for ent in r['entities'] if ent['type'] == 'KẾT_QUẢ_XÉT_NGHIỆM'); cid=e['metadata']['concept_id']
         assert r['text'][e['start']:e['end']] == e['text']
         assert not any(name == e['text'] or e['text'].startswith(name + ' ') for name in test_names)
         before=r['text'][:e['start']]; after=r['text'][e['end']:]
@@ -85,15 +85,17 @@ def test_build_balanced_corpus_train_only_and_gold_dev_independent(tmp_path):
     train_syn.write_text(json.dumps({'id':'dev_leak','text':'dev text','entities':[],'relations':[],'source':'fixture','source_split':'dev','license':'fixture','metadata':{}}, ensure_ascii=False)+'\n', encoding='utf-8')
     output=tmp_path/'processed'/'train.v2.balanced.jsonl'; audit=tmp_path/'annotation'/'audit_v2.todo.jsonl'; report_path=tmp_path/'processed'/'balanced_v2_report.json'
     gold=tmp_path/'annotation'/'gold_dev.todo.jsonl'; gold.parent.mkdir(parents=True); gold.write_text('gold sentinel\n', encoding='utf-8')
-    cfg=BalanceConfig(min_entities_per_type=60, min_canonical_concepts_per_type=15, min_canonical_concepts_drug_diagnosis=20, max_top_canonical_share=0.07, audit_samples_per_type=3)
+    cfg=BalanceConfig(min_entities_per_type=200, min_canonical_concepts_per_type=15, min_canonical_concepts_drug_diagnosis=20, max_top_canonical_share=0.07, audit_samples_per_type=3)
     report=build_balanced_corpus(train_silver, train_syn, output, audit, report_path, cfg)
     rows=[json.loads(l) for l in output.read_text(encoding='utf-8').splitlines()]
     assert rows and all(r['source_split'] == 'train' for r in rows)
     assert 'dev_leak' not in {r['id'] for r in rows}
     assert gold.read_text(encoding='utf-8') == 'gold sentinel\n'
     audit_rows=[json.loads(l) for l in audit.read_text(encoding='utf-8').splitlines()]
-    assert len(audit_rows) == 3 * len(VALID_TYPES)
+    assert len(audit_rows) >= 3
     assert all(r['review_status'] == 'pending' and not r['metadata']['gold_evaluation'] for r in audit_rows)
+    proposed_types={e['type'] for r in audit_rows for e in r['proposed_entities']}
+    assert proposed_types == VALID_TYPES
     assert report['source_composition']['targeted_synthetic'] > 0
 
 
@@ -106,3 +108,31 @@ def test_balanced_gate_blocks_top_share_and_missing_type():
         assert 'minimum' in str(exc) or 'top canonical share' in str(exc)
     else:
         raise AssertionError('gate should fail')
+
+class CharTokenizer:
+    def __call__(self, text, return_offsets_mapping=True, truncation=True, max_length=128, stride=16, return_overflowing_tokens=True, padding=False):
+        offsets=[(0,0)] + [(i,i+1) for i in range(len(text))] + [(0,0)]
+        return {"input_ids":[0]+[1]*len(text)+[2],"attention_mask":[1]*(len(text)+2),"offset_mapping":offsets}
+
+
+def test_multi_pair_lab_document_and_bilou_preprocessing():
+    from src.models.ner.preprocess import preprocess_records, decode_feature_spans
+    rows=generate_targeted_synthetic(BalanceConfig(min_entities_per_type=40))
+    row=next(r for r in rows if r['id'].startswith('v2_1_multi_lab_') and 'HbA1c 8.1%' in r['text'])
+    assert len(row['entities']) == 6
+    expected={('HbA1c','TÊN_XÉT_NGHIỆM'),('8.1%','KẾT_QUẢ_XÉT_NGHIỆM'),('CRP','TÊN_XÉT_NGHIỆM'),('20 mg/L','KẾT_QUẢ_XÉT_NGHIỆM'),('INR','TÊN_XÉT_NGHIỆM'),('2.5','KẾT_QUẢ_XÉT_NGHIỆM')}
+    assert {(e['text'], e['type']) for e in row['entities']} == expected
+    spans=sorted((e['start'],e['end']) for e in row['entities'])
+    assert all(spans[i][1] <= spans[i+1][0] for i in range(len(spans)-1))
+    feats, stats=preprocess_records([row], CharTokenizer(), 128, 16)
+    decoded={(s['text'], s['type']) for s in decode_feature_spans(feats[0], feats[0]['labels'])}
+    assert expected <= decoded
+    assert stats.dropped_boundary_entities == 0
+
+
+def test_negative_lab_context_controls_are_not_generated_as_results():
+    rows=generate_targeted_synthetic(BalanceConfig(min_entities_per_type=120))
+    result_texts=[e['text'] for r in rows for e in r['entities'] if e['type'] == 'KẾT_QUẢ_XÉT_NGHIỆM']
+    assert '180 cm' not in result_texts
+    assert '70 kg' not in result_texts
+    assert all(e['type'] != 'THUỐC' for r in rows for e in r['entities'] if e['text'] == 'INR')
