@@ -1,0 +1,9 @@
+{
+  "seed": 83,
+  "train_min_positive": {"isNegated": 600, "isFamily": 600, "isHistorical": 600},
+  "train_min_none": 1200,
+  "combo_min": 100,
+  "splits": ["train", "dev", "test"],
+  "output_dir": "data/processed/assertion",
+  "audit_path": "data/annotation/assertion_audit.todo.jsonl"
+}

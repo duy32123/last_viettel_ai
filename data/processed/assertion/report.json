@@ -1,0 +1,84 @@
+{
+  "record_counts": {
+    "train": 3387,
+    "dev": 8,
+    "test": 8
+  },
+  "label_positive_counts": {
+    "train": {
+      "isNegated": 1593,
+      "isFamily": 1194,
+      "isHistorical": 1463
+    },
+    "dev": {
+      "isNegated": 4,
+      "isHistorical": 4
+    },
+    "test": {
+      "isFamily": 4
+    }
+  },
+  "label_negative_counts": {
+    "train": {
+      "isFamily": 2395,
+      "isHistorical": 2126,
+      "isNegated": 1996
+    },
+    "dev": {
+      "isFamily": 16,
+      "isHistorical": 12,
+      "isNegated": 12
+    },
+    "test": {
+      "isNegated": 12,
+      "isHistorical": 12,
+      "isFamily": 8
+    }
+  },
+  "combination_counts": {
+    "train": {
+      "isNegated": 399,
+      "NONE": 1200,
+      "isFamily": 129,
+      "isHistorical": 398,
+      "isNegated+isHistorical": 398,
+      "isNegated+isFamily": 398,
+      "isNegated+isFamily+isHistorical": 398,
+      "isFamily+isHistorical": 269
+    },
+    "dev": {
+      "isNegated": 4,
+      "NONE": 8,
+      "isHistorical": 4
+    },
+    "test": {
+      "isFamily": 4,
+      "NONE": 8
+    }
+  },
+  "template_families": {
+    "train": [
+      "combo_all",
+      "combo_family_neg",
+      "combo_neg_hist",
+      "family",
+      "historical",
+      "negation",
+      "none"
+    ],
+    "dev": [
+      "dev_scope"
+    ],
+    "test": [
+      "test_scope"
+    ]
+  },
+  "duplicates": {
+    "train": 0,
+    "dev": 0,
+    "test": 0
+  },
+  "leakage": false,
+  "invalid_offsets": 0,
+  "audit_pending": 120
+}

@@ -20,3 +20,8 @@ data/processed/train.v2_1.lab_repair.jsonl
 
 # Phase 5H generated negative repair corpus (rebuild locally after audit)
 data/processed/train.v2_2.negative_repair.jsonl
+
+# Phase 6A generated assertion corpora (rebuild locally)
+data/processed/assertion/train.jsonl
+data/processed/assertion/dev.jsonl
+data/processed/assertion/test.jsonl
