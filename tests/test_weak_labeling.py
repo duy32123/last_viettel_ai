@@ -8,10 +8,24 @@ def rec(text, mention, label, rid='r'):
     return {'id':rid,'text':text,'source':'fixture','source_split':'train','license':'fixture','source_entities':[{'start':s,'end':e,'text':mention,'source_label':label}], 'metadata':{'upstream_id':rid}}
 
 
-def test_inr_not_drug_and_known_drugs_are_drugs():
-    text='INR cao, đang dùng Prozac và Zoloft.'
-    s=text.index('INR')
-    assert classify_candidate(text,'DRUGCHEMICAL',s,s+3).target == 'IGNORE'
+class MockQwenBackend:
+    model_name='mock-qwen'
+    def __init__(self, labels):
+        self.labels=labels; self.calls=[]
+    def classify_batch(self, candidates, prompt_version):
+        self.calls.append((prompt_version, candidates))
+        value=self.labels[prompt_version]
+        return [value for _ in candidates]
+
+
+def test_inr_and_hba1c_are_test_names_not_drugs_or_results():
+    text='INR cao, HBA1C 7.2%, đang dùng Prozac và Zoloft.'
+    for mention in ['INR','HBA1C']:
+        s=text.index(mention)
+        d=classify_candidate(text,'DRUGCHEMICAL',s,s+len(mention))
+        assert d.target == 'TÊN_XÉT_NGHIỆM'
+    s=text.index('7.2%')
+    assert classify_candidate(text,'UNITCALIBRATOR',s,s+len('7.2%')).target == 'KẾT_QUẢ_XÉT_NGHIỆM'
     for drug in ['Prozac','Zoloft']:
         s=text.index(drug); d=classify_candidate(text,'DRUGCHEMICAL',s,s+len(drug))
         assert d.target == 'THUỐC' and d.confidence >= 0.9
@@ -32,6 +46,8 @@ def test_unitcalibrator_context_result_rules():
     assert classify_candidate(text,'UNITCALIBRATOR',s,s+3).target == 'IGNORE'
     text='WBC 12 G/L'; s=text.index('12 G/L')
     assert classify_candidate(text,'UNITCALIBRATOR',s,s+6).target == 'KẾT_QUẢ_XÉT_NGHIỆM'
+    text='HBA1C được kiểm tra'; s=text.index('HBA1C')
+    assert classify_candidate(text,'UNITCALIBRATOR',s,s+5).target == 'TÊN_XÉT_NGHIỆM'
 
 
 def test_unicode_crlf_exact_offsets_and_train_only(tmp_path):
@@ -49,10 +65,39 @@ def test_unicode_crlf_exact_offsets_and_train_only(tmp_path):
     train=tmp_path/'train.real.jsonl'; synth=tmp_path/'syn.jsonl'; out=tmp_path/'out'; ann=tmp_path/'ann'
     train.write_text('\n'.join(json.dumps(r,ensure_ascii=False) for r in rows)+'\n',encoding='utf-8')
     synth.write_text('',encoding='utf-8')
+    (ann/'gold_dev.todo.jsonl').parent.mkdir(parents=True)
+    (ann/'gold_dev.todo.jsonl').write_text('sentinel gold\n', encoding='utf-8')
+    (ann/'local_test.todo.jsonl').write_text('sentinel test\n', encoding='utf-8')
     rep=build_weak_corpus(train,synth,out,ann)
     assert (out/'train.silver.jsonl').exists()
     assert (ann/'train.silver.todo.jsonl').exists()
+    assert (ann/'gold_dev.todo.jsonl').read_text(encoding='utf-8') == 'sentinel gold\n'
+    assert (ann/'local_test.todo.jsonl').read_text(encoding='utf-8') == 'sentinel test\n'
     assert rep['duplicate_leakage'] == 'checked_train_only_no_dev_test_inputs'
+
+
+def test_qwen_backend_two_pass_accepts_only_agreement(tmp_path):
+    rows=[rec('Bệnh nhân có biểu hiện lạ.','biểu hiện lạ','DISEASESYMTOM','q1')]
+    backend=MockQwenBackend({'phase5d-weak-label-v1-a':'TRIỆU_CHỨNG','phase5d-weak-label-v1-b':'TRIỆU_CHỨNG'})
+    accepted, todo, report=weak_label_records(rows, qwen_enabled=True, qwen_backend=backend, qwen_cache=tmp_path/'qwen.json')
+    assert len(backend.calls) == 2
+    assert accepted and not todo
+    ent=accepted[0]['entities'][0]
+    assert ent['type'] == 'TRIỆU_CHỨNG'
+    assert ent['metadata']['qwen_agreement'] is True
+    assert accepted[0]['text'][ent['start']:ent['end']] == ent['text']
+    assert report['qwen_agreement']['agree'] == 1
+
+
+def test_qwen_disagreement_stays_pending():
+    rows=[rec('Bệnh nhân có biểu hiện lạ.','biểu hiện lạ','DISEASESYMTOM','q2')]
+    backend=MockQwenBackend({'phase5d-weak-label-v1-a':'TRIỆU_CHỨNG','phase5d-weak-label-v1-b':'CHẨN_ĐOÁN'})
+    accepted, todo, report=weak_label_records(rows, qwen_enabled=True, qwen_backend=backend)
+    assert not accepted and todo
+    ent=todo[0]['proposed_entities'][0]
+    assert ent['review_status'] == 'pending'
+    assert ent['metadata']['qwen_agreement'] is False
+    assert report['qwen_agreement']['disagree'] == 1
 
 
 def test_ambiguous_goes_to_todo_and_invalid_offsets_rejected():
