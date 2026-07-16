@@ -1,0 +1,11 @@
+{
+  "counts_by_type": {},
+  "status_counts": {},
+  "source_label_confusion": {},
+  "confidence_distribution": {},
+  "examples": {},
+  "rejected": 0,
+  "invalid": 0,
+  "class_imbalance_ratio": null,
+  "duplicate_leakage": "checked_train_only_no_dev_test_inputs"
+}
