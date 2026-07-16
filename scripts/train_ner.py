@@ -8,6 +8,14 @@ from src.models.ner.inference import merge_chunk_predictions
 from src.models.ner.metrics import evaluate_spans
 
 
+def _cfg_int(cfg, name, fallback):
+    return int(cfg.get(name, fallback))
+
+
+def _cfg_bool(cfg, name, fallback=False):
+    return bool(cfg.get(name, fallback))
+
+
 def group_gold(features):
     docs={}
     for f in features:
@@ -76,13 +84,49 @@ def main():
     except Exception as e:
         raise RuntimeError("transformers is required for full NER training; install dependencies before running this command") from e
     set_seed(int(cfg.get("seed",13)))
+    if cfg.get("metadata", {}).get("experimental_pilot"):
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                raise RuntimeError("Pilot XLM-R-large training requires CUDA; run scripts/gpu_preflight.py and use --dry-run-smoke on CPU-only machines")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError("Pilot XLM-R-large training requires torch with CUDA") from e
     tok=AutoTokenizer.from_pretrained(cfg["model_name"], use_fast=True)
     if not getattr(tok, "is_fast", False): raise ValueError("fast tokenizer is required")
     train_features, train_stats=preprocess_records(read_jsonl(cfg["train_path"]), tok, int(cfg["max_length"]), int(cfg["stride"]))
     dev_features, dev_stats=preprocess_records(read_jsonl(cfg["dev_path"]), tok, int(cfg["max_length"]), int(cfg["stride"]))
     model=AutoModelForTokenClassification.from_pretrained(cfg["model_name"], num_labels=len(LABEL2ID), label2id=LABEL2ID, id2label={str(k):v for k,v in ID2LABEL.items()})
+    if cfg.get("gradient_checkpointing") and hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable()
     out=Path(cfg["output_dir"]); out.mkdir(parents=True, exist_ok=True)
-    args=TrainingArguments(output_dir=str(out), learning_rate=float(cfg["learning_rate"]), num_train_epochs=float(cfg["epochs"]), per_device_train_batch_size=int(cfg["batch_size"]), per_device_eval_batch_size=int(cfg["batch_size"]), gradient_accumulation_steps=int(cfg["gradient_accumulation_steps"]), warmup_ratio=float(cfg["warmup_ratio"]), weight_decay=float(cfg["weight_decay"]), fp16=bool(cfg.get("fp16",False)), bf16=bool(cfg.get("bf16",False)), evaluation_strategy="epoch", save_strategy="epoch", load_best_model_at_end=True, metric_for_best_model="strict_span_f1", greater_is_better=True, seed=int(cfg.get("seed",13)), remove_unused_columns=False)
+    interval = "steps" if cfg.get("max_steps") else "epoch"
+    args=TrainingArguments(
+        output_dir=str(out),
+        learning_rate=float(cfg["learning_rate"]),
+        num_train_epochs=float(cfg.get("epochs", 1)),
+        max_steps=int(cfg.get("max_steps", -1)),
+        per_device_train_batch_size=_cfg_int(cfg, "per_device_train_batch_size", cfg.get("batch_size", 1)),
+        per_device_eval_batch_size=_cfg_int(cfg, "per_device_eval_batch_size", cfg.get("batch_size", 1)),
+        gradient_accumulation_steps=int(cfg["gradient_accumulation_steps"]),
+        warmup_ratio=float(cfg["warmup_ratio"]),
+        weight_decay=float(cfg["weight_decay"]),
+        fp16=_cfg_bool(cfg,"fp16",False),
+        bf16=_cfg_bool(cfg,"bf16",False),
+        evaluation_strategy=interval,
+        eval_steps=cfg.get("eval_steps"),
+        save_strategy=interval,
+        save_steps=cfg.get("save_steps"),
+        logging_steps=int(cfg.get("logging_steps", 50)),
+        save_total_limit=cfg.get("save_total_limit"),
+        load_best_model_at_end=True,
+        metric_for_best_model=cfg.get("metric_for_best_model", "strict_span_f1"),
+        greater_is_better=True,
+        seed=int(cfg.get("seed",13)),
+        remove_unused_columns=False,
+        gradient_checkpointing=_cfg_bool(cfg,"gradient_checkpointing",False),
+    )
     collator=DataCollatorForTokenClassification(tok)
     trainer=Trainer(model=model, args=args, train_dataset=FeatureDataset(train_features), eval_dataset=FeatureDataset(dev_features), tokenizer=tok, data_collator=collator, compute_metrics=build_compute_metrics(dev_features, model.config.id2label), callbacks=[EarlyStoppingCallback(early_stopping_patience=int(cfg.get("early_stopping_patience",2)))])
     sha=subprocess.run(["git","rev-parse","HEAD"], text=True, capture_output=True).stdout.strip()
