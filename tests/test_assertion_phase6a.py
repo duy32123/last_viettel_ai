@@ -4,7 +4,7 @@ from src.data.assertion_generator import AssertionGenConfig, build_assertion_cor
 from src.models.assertion.inference import predict_assertions, merge_rule_model, serialize_assertions
 from src.models.assertion.labels import ASSERTION_LABELS, to_vector, from_scores
 from src.models.assertion.metrics import multilabel_metrics, tune_thresholds
-from src.models.assertion.preprocess import make_examples, register_special_tokens, SPECIAL_TOKENS
+from src.models.assertion.preprocess import make_examples, register_special_tokens, SPECIAL_TOKENS, tokenize_examples, FloatMultilabelCollator, assert_float_multilabel_batch
 from src.models.assertion.rules import rule_assertions
 from scripts.train_assertion import training_args_kwargs, trainer_kwargs
 
@@ -67,6 +67,27 @@ def test_preprocess_entity_centered_context_and_special_tokens():
     assert added == len(SPECIAL_TOKENS) and model.size == len(tok)
     assert '<ENT_START>' in tok.tokens and '<TYPE_KẾT_QUẢ_XÉT_NGHIỆM>' in tok.tokens
 
+def test_tokenizer_crop_keeps_markers_long_unicode_crlf_edges():
+    pytest.importorskip("transformers")
+    from transformers import BertTokenizerFast
+    import tempfile
+    vocab=["[PAD]","[UNK]","[CLS]","[SEP]","[MASK]"] + SPECIAL_TOKENS + ["A","B","TIỀN","SỬ","đau","ngực","sốt","cuối","dòng"]
+    with tempfile.TemporaryDirectory() as d:
+        p=f"{d}/vocab.txt"; open(p,"w",encoding="utf-8").write("\n".join(vocab))
+        tok=BertTokenizerFast(vocab_file=p, do_lower_case=False)
+        register_special_tokens(tok)
+        for text, mention in [
+            ("đau ngực " + "A "*500, "đau ngực"),
+            ("A "*300 + "TIỀN SỬ\r\nsốt\r\n" + "B "*300, "sốt"),
+            ("A "*500 + "cuối dòng", "cuối dòng"),
+        ]:
+            e=ent(text, mention, "TRIỆU_CHỨNG"); e["assertions"]=["isNegated"]
+            ex=make_examples([{"id":"r","text":text,"entities":[e]}], max_chars=160)[0]
+            enc=tokenize_examples([ex], tok, max_length=64, padding=True)
+            ids=enc["input_ids"][0]
+            assert tok.convert_tokens_to_ids("<ENT_START>") in ids
+            assert tok.convert_tokens_to_ids("<ENT_END>") in ids
+
 def test_hybrid_thresholds_metrics_and_merge():
     assert merge_rule_model(['isNegated'], [0.1,0.9,0.9], {'isNegated':0.5,'isFamily':0.5,'isHistorical':0.5}) == ['isNegated','isFamily','isHistorical']
     m=multilabel_metrics([['isNegated'], [], ['isFamily','isHistorical']], [['isNegated'], [], ['isFamily']])
@@ -74,6 +95,12 @@ def test_hybrid_thresholds_metrics_and_merge():
     th=tune_thresholds([[1,0,0],[0,1,0],[0,0,1],[0,0,0]], [[.9,.1,.1],[.2,.8,.1],[.1,.2,.85],[.1,.1,.1]])
     assert set(th) == set(ASSERTION_LABELS) and all('threshold' in v and 'f1' in v for v in th.values())
     with pytest.raises(ValueError): tune_thresholds([[1,0,0],[1,1,0]], [[.9,.1,.1],[.8,.8,.1]])
+
+def test_collator_rejects_long_labels_and_accepts_float32():
+    torch=pytest.importorskip("torch")
+    with pytest.raises(TypeError):
+        assert_float_multilabel_batch({"labels":torch.tensor([[1,0,0]], dtype=torch.long)})
+    assert_float_multilabel_batch({"labels":torch.tensor([[1,0,0]], dtype=torch.float32)})
 
 def test_assertion_corpus_builder_gate_leakage_offsets_and_audit(tmp_path):
     out=tmp_path/'assertion'; audit=tmp_path/'audit.jsonl'
@@ -84,6 +111,9 @@ def test_assertion_corpus_builder_gate_leakage_offsets_and_audit(tmp_path):
         assert not any('True' in key for key in report['synthetic_gold_flags'][split])
         assert set(report['entity_example_counts'][split]) == {'TRIỆU_CHỨNG','CHẨN_ĐOÁN','TÊN_XÉT_NGHIỆM','KẾT_QUẢ_XÉT_NGHIỆM','THUỐC'}
         assert report['duplicates'][split] == 0
+    assert report["semantic_template_overlap"] == {"train_vs_dev":0,"train_vs_test":0,"dev_vs_test":0}
+    assert report["label_dtype"] == "float32"
+    assert report["marker_truncation_count"] == 0
     assert not report['leakage']
     train=[json.loads(l) for l in (out/'train.jsonl').read_text(encoding='utf-8').splitlines()]
     for r in train:
@@ -100,6 +130,35 @@ def test_semantic_hash_strips_numeric_prefix_and_split_families_disjoint(tmp_pat
     report=build_assertion_corpus(tmp_path/'a', tmp_path/'audit.jsonl', AssertionGenConfig(train_examples=500, dev_examples=180, test_examples=180, min_split_label_pos=30, min_split_label_neg=30, min_none=35, combo_min=8, all_three_min=5, audit=2))
     fams={k:set(v) for k,v in report['template_families'].items()}
     assert fams['train'].isdisjoint(fams['dev']) and fams['train'].isdisjoint(fams['test']) and fams['dev'].isdisjoint(fams['test'])
+
+@pytest.mark.integration
+def test_offline_trainer_step_save_reload_and_model_inference(tmp_path):
+    torch=pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    from transformers import BertConfig, BertForSequenceClassification, BertTokenizerFast, Trainer, TrainingArguments
+    from datasets import Dataset
+    vocab=["[PAD]","[UNK]","[CLS]","[SEP]","[MASK]"] + SPECIAL_TOKENS + ["Không","ghi","nhận","đau","ngực","Mẹ","bệnh","nhân","có","sốt","Theo","dõi","."]
+    vocab_path=tmp_path/"vocab.txt"; vocab_path.write_text("\n".join(vocab), encoding="utf-8")
+    tok=BertTokenizerFast(vocab_file=str(vocab_path), do_lower_case=False)
+    cfg=BertConfig(vocab_size=len(tok)+len(SPECIAL_TOKENS), hidden_size=24, num_hidden_layers=1, num_attention_heads=2, intermediate_size=32, num_labels=3, problem_type="multi_label_classification")
+    model=BertForSequenceClassification(cfg)
+    register_special_tokens(tok, model)
+    records=[
+        {"id":"r1","text":"Không ghi nhận đau ngực.","entities":[{**ent("Không ghi nhận đau ngực.","đau ngực","TRIỆU_CHỨNG"),"assertions":["isNegated"]}]},
+        {"id":"r2","text":"Mẹ bệnh nhân có sốt.","entities":[{**ent("Mẹ bệnh nhân có sốt.","sốt","TRIỆU_CHỨNG"),"assertions":["isFamily"]}]},
+    ]
+    examples=make_examples(records)
+    def enc(batch):
+        return tokenize_examples([{"input_text":t,"labels":l} for t,l in zip(batch["input_text"], batch["labels"])], tok, max_length=64, padding=False)
+    ds=Dataset.from_list(examples).map(enc, batched=True, remove_columns=list(examples[0].keys()))
+    args=TrainingArguments(output_dir=str(tmp_path/"out"), max_steps=1, per_device_train_batch_size=2, report_to="none", save_strategy="no")
+    trainer=Trainer(model=model, args=args, train_dataset=ds, data_collator=FloatMultilabelCollator(tok))
+    trainer.train()
+    ckpt=tmp_path/"ckpt"; trainer.save_model(str(ckpt)); tok.save_pretrained(str(ckpt))
+    (ckpt/"thresholds.json").write_text(json.dumps({l:0.0 for l in ASSERTION_LABELS}), encoding="utf-8")
+    reloaded=BertForSequenceClassification.from_pretrained(str(ckpt))
+    out=predict_assertions("Theo dõi đau ngực.", [ent("Theo dõi đau ngực.","đau ngực","TRIỆU_CHỨNG")], model=reloaded, tokenizer=BertTokenizerFast.from_pretrained(str(ckpt)), thresholds={l:0.0 for l in ASSERTION_LABELS})
+    assert out[0]["assertions"] == ASSERTION_LABELS
 
 def test_training_argument_compatibility_report_to_none_and_trainer_tokenizer_fallback():
     class ArgsEval:

@@ -30,7 +30,7 @@ class AssertionGenConfig:
     all_three_min:int=20
     audit:int=120
 
-SPLIT_FAMILIES={"train":["train_negation","train_family","train_history","train_none","train_combo"],"dev":["synthetic_dev_scope","synthetic_dev_counterfactual","synthetic_dev_section"],"test":["synthetic_test_scope","synthetic_test_counterfactual","synthetic_test_section"]}
+SPLIT_FAMILIES={"train":["negation_admission","family_history_note","past_history_note","current_problem","combined_history"],"dev":["dev_scope_paraphrase","dev_counterfactual_paraphrase","dev_section_paraphrase"],"test":["test_scope_paraphrase","test_counterfactual_paraphrase","test_section_paraphrase"]}
 COMBOS=[[],["isNegated"],["isFamily"],["isHistorical"],["isFamily","isHistorical"],["isNegated","isHistorical"],["isNegated","isFamily"],["isNegated"],[],["isFamily"],["isHistorical"],["isFamily","isHistorical"],["isNegated","isHistorical"],["isNegated","isFamily"],[],["isNegated"],["isFamily"],["isHistorical"],["isFamily","isHistorical"],["isNegated","isFamily","isHistorical"]]
 
 def _entity(text, mention, typ, labels):
@@ -49,15 +49,38 @@ def _context(i):
     return f"{CONTEXTS[i % len(CONTEXTS)]} {STYLE[(i//len(CONTEXTS)) % len(STYLE)]} nhóm {a} {b} {c}"
 
 def _text_for(combo, mention, i, split):
-    ctx={"train":"bộ huấn luyện", "dev":"bộ phát triển", "test":"bộ kiểm thử"}[split] + " " + _context(i)
-    if combo == []: return f"{ctx}: Ghi nhận {mention} trong lần khám này.", "counterfactual"
-    if combo == ["isNegated"]: return f"{ctx}: Không ghi nhận {mention} nhưng tình trạng khác ổn định.", "scope"
-    if combo == ["isFamily"]: return f"{ctx}: Mẹ bệnh nhân có {mention}, bệnh nhân hiện chưa ghi nhận vấn đề này.", "family"
-    if combo == ["isHistorical"]: return f"TIỀN SỬ\r\n{ctx}: {mention}.\r\nHIỆN TẠI\r\nTheo dõi triệu chứng mới.", "section"
-    if combo == ["isFamily","isHistorical"]: return f"{ctx}: Tiền sử gia đình có {mention}; hiện tại bệnh nhân không than phiền liên quan.", "family_historical"
-    if combo == ["isNegated","isHistorical"]: return f"{ctx}: Trước đây không ghi nhận {mention}. Hiện tại đánh giá lại.", "neg_historical"
-    if combo == ["isNegated","isFamily"]: return f"{ctx}: Người nhà phủ nhận {mention}; bệnh nhân trao đổi thêm sau.", "family_negated"
-    return f"{ctx}: Tiền sử gia đình không ghi nhận {mention}. Hiện tại không dùng thông tin này làm chẩn đoán.", "all_three"
+    ctx=_context(i)
+    patterns={
+      "train":{
+        "none":f"{ctx}: Bác sĩ ghi nhận {mention} trong lần khám này.",
+        "neg":f"{ctx}: Không ghi nhận {mention} nhưng tình trạng khác ổn định.",
+        "fam":f"{ctx}: Mẹ bệnh nhân có {mention}, bệnh nhân hiện chưa ghi nhận vấn đề này.",
+        "hist":f"TIỀN SỬ\r\n{ctx}: {mention}.\r\nHIỆN TẠI\r\nTheo dõi triệu chứng mới.",
+        "fh":f"{ctx}: Tiền sử gia đình có {mention}; hiện tại bệnh nhân không than phiền liên quan.",
+        "nh":f"{ctx}: Trước đây không ghi nhận {mention}. Hiện tại đánh giá lại.",
+        "fn":f"{ctx}: Người nhà phủ nhận {mention}; bệnh nhân trao đổi thêm sau.",
+        "all":f"{ctx}: Tiền sử gia đình không ghi nhận {mention}. Hiện tại không dùng thông tin này làm chẩn đoán."},
+      "dev":{
+        "none":f"Trong ghi chú lâm sàng tại {ctx}, nhân viên y tế mô tả {mention} đang được theo dõi.",
+        "neg":f"Qua thăm khám hôm nay ở {ctx}, bác sĩ loại trừ {mention} trong cùng nhận định.",
+        "fam":f"Khai thác bệnh sử tại {ctx} cho biết bố từng có {mention}; người bệnh không tự báo triệu chứng tương ứng.",
+        "hist":f"BỆNH SỬ CŨ\r\nHồ sơ {ctx} lưu {mention}.\r\nKHÁM LẠI\r\nChưa có diễn biến cấp.",
+        "fh":f"Thông tin họ hàng trong {ctx} ghi nhận {mention} từ các lần khám cũ; hiện chưa dùng làm vấn đề chính.",
+        "nh":f"Hồ sơ cũ tại {ctx} phủ nhận {mention}, sau đó bệnh nhân được hẹn đánh giá định kỳ.",
+        "fn":f"Người nhà nói tại {ctx} rằng chưa có dấu hiệu {mention} khi trao đổi với điều dưỡng.",
+        "all":f"Bệnh sử gia đình trước đây ở {ctx} không có dấu hiệu {mention}; bác sĩ chỉ lưu để đối chiếu."},
+      "test":{
+        "none":f"Ở phần nhận định cuối của {ctx}, bác sĩ liệt kê {mention} như một vấn đề cần xử trí.",
+        "neg":f"Kết luận khám tại {ctx} ghi chưa thấy {mention} sau khi đối chiếu triệu chứng.",
+        "fam":f"Anh ruột được ghi trong {ctx} có {mention}; bệnh nhân hiện không được gán chẩn đoán này.",
+        "hist":f"THÔNG TIN TRƯỚC ĐÂY\r\n{ctx} ghi đã từng {mention}.\r\nĐỢT NÀY\r\nTheo dõi thêm.",
+        "fh":f"Dòng họ có tiền sử {mention} trong {ctx} ở lần khai thác cũ; lần này chưa xác nhận trên bệnh nhân.",
+        "nh":f"Tài liệu trước nhập viện từ {ctx} không ghi nhận {mention}; bác sĩ tiếp tục rà soát.",
+        "fn":f"Trao đổi với gia đình tại {ctx} cho thấy không có {mention} trong người nhà.",
+        "all":f"Tiền sử người nhà trước đây trong {ctx} phủ nhận {mention}; thông tin chỉ dùng để tham khảo."}}
+    key={():"none",("isNegated",):"neg",("isFamily",):"fam",("isHistorical",):"hist",("isFamily","isHistorical"):"fh",("isNegated","isHistorical"):"nh",("isNegated","isFamily"):"fn"}.get(tuple(combo),"all")
+    slices={"none":"counterfactual","neg":"scope","fam":"family","hist":"section","fh":"family_historical","nh":"neg_historical","fn":"family_negated","all":"all_three"}
+    return patterns[split][key], slices[key]
 
 def _make(split, idx, combo):
     typ,m=_choose_entity(idx); text,slice_name=_text_for(combo,m,idx,split)
@@ -106,6 +129,14 @@ _PREFIX_RE=re.compile(r"^(?:Lượt khám|Phiên)\s+<NUM>:\s*", re.I)
 def _norm_text(text):
     t=unicodedata.normalize("NFC", text).casefold(); t=re.sub(r"^(?:lượt khám|phiên)\s+\d+:\s*", "", t); t=re.sub(r"\s+", " ", t).strip(); return t
 
+def semantic_template_signature(rec):
+    text=_norm_text(rec["text"])
+    for e in sorted(rec["entities"], key=lambda x: len(x["text"]), reverse=True):
+        text=text.replace(e["text"].casefold(), "<entity>")
+    text=re.sub(r"\b(?:train|dev|test|assert_\w+_\d+)\b", "<split_id>", text)
+    text=re.sub(r"\d+", "<num>", text)
+    return hashlib.sha256(text.encode()).hexdigest()
+
 def canonical_hash(rec):
     anns=sorted((e["text"].casefold(),e["type"],tuple(e.get("assertions",[]))) for e in rec["entities"])
     return hashlib.sha256(json.dumps([_norm_text(rec["text"]),anns], ensure_ascii=False).encode()).hexdigest()
@@ -118,19 +149,22 @@ def validate_records(rows):
             ordered(e.get("assertions", []))
 
 def build_report(splits: dict[str,list[dict[str,Any]]]) -> dict[str,Any]:
-    report={"record_counts":{k:len(v) for k,v in splits.items()},"entity_example_counts":{},"label_positive_counts":{},"label_negative_counts":{},"combination_counts":{},"template_families":{},"slice_counts":{},"duplicates":{},"leakage":False,"invalid_offsets":0,"synthetic_gold_flags":{},"audit_pending":0}
+    report={"record_counts":{k:len(v) for k,v in splits.items()},"entity_example_counts":{},"label_positive_counts":{},"label_negative_counts":{},"combination_counts":{},"combination_coverage":{},"template_families":{},"slice_counts":{},"duplicates":{},"leakage":False,"semantic_template_overlap":{},"marker_truncation_count":0,"label_dtype":"float32","invalid_offsets":0,"synthetic_gold_flags":{},"audit_pending":0}
     all_hashes={}
+    signatures={}
     for split,rows in splits.items():
         pos=Counter(); neg=Counter(); combo=Counter(); fam=set(); seen=Counter(); ent_counts=Counter(); slices=Counter(); gold_flags=Counter()
         for r in rows:
-            fam.add(r["metadata"]["template_family"]); seen[canonical_hash(r)] += 1; slices[r["metadata"].get("slice","general")]+=1; gold_flags[(r["metadata"].get("gold_evaluation"), r["metadata"].get("official_evaluation"))]+=1
+            fam.add(r["metadata"]["template_family"]); seen[canonical_hash(r)] += 1; signatures.setdefault(split,set()).add(semantic_template_signature(r)); slices[r["metadata"].get("slice","general")]+=1; gold_flags[(r["metadata"].get("gold_evaluation"), r["metadata"].get("official_evaluation"))]+=1
             for e in r["entities"]:
                 ent_counts[e["type"]]+=1; labs=ordered(e.get("assertions", [])); combo["+".join(labs) or "NONE"] += 1
                 for lab in ASSERTION_LABELS: (pos if lab in labs else neg)[lab] += 1
-        report["entity_example_counts"][split]=dict(ent_counts); report["label_positive_counts"][split]=dict(pos); report["label_negative_counts"][split]=dict(neg); report["combination_counts"][split]=dict(combo); report["template_families"][split]=sorted(fam); report["slice_counts"][split]=dict(slices); report["duplicates"][split]=sum(c-1 for c in seen.values() if c>1); report["synthetic_gold_flags"][split]={str(k):v for k,v in gold_flags.items()}
+        report["entity_example_counts"][split]=dict(ent_counts); report["label_positive_counts"][split]=dict(pos); report["label_negative_counts"][split]=dict(neg); report["combination_counts"][split]=dict(combo); report["combination_coverage"][split]=sorted(combo); report["template_families"][split]=sorted(fam); report["slice_counts"][split]=dict(slices); report["duplicates"][split]=sum(c-1 for c in seen.values() if c>1); report["synthetic_gold_flags"][split]={str(k):v for k,v in gold_flags.items()}
         for h in seen:
             if h in all_hashes and all_hashes[h] != split: report["leakage"]=True
             all_hashes[h]=split
+    for a,b in [("train","dev"),("train","test"),("dev","test")]:
+        report["semantic_template_overlap"][f"{a}_vs_{b}"]=len(signatures.get(a,set()) & signatures.get(b,set()))
     return report
 
 def assert_gate(report, cfg: AssertionGenConfig):
@@ -147,6 +181,7 @@ def assert_gate(report, cfg: AssertionGenConfig):
     for lab in ASSERTION_LABELS:
         p=report["label_positive_counts"]["train"][lab]; n=report["label_negative_counts"]["train"][lab]
         if max(p,n)/max(1,min(p,n)) > 3: raise ValueError(f"train imbalance for {lab}")
+    if any(report["semantic_template_overlap"].values()): raise ValueError("semantic template overlap detected")
     if report["leakage"] or any(report["duplicates"].values()) or report["invalid_offsets"]: raise ValueError("leakage/duplicates/offsets detected")
 
 def build_assertion_corpus(out_dir: str|Path="data/processed/assertion", audit_path: str|Path="data/annotation/assertion_audit.todo.jsonl", cfg: AssertionGenConfig|None=None):

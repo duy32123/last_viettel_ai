@@ -3,7 +3,7 @@ import argparse, json, subprocess, sys, inspect
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.models.assertion.labels import ASSERTION_LABELS, LABEL2ID, ID2LABEL
 from src.models.assertion.metrics import multilabel_metrics, tune_thresholds, labels_from_scores
-from src.models.assertion.preprocess import make_examples, register_special_tokens
+from src.models.assertion.preprocess import make_examples, register_special_tokens, tokenize_examples, FloatMultilabelCollator
 
 def load_jsonl(path):
     p=Path(path); return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()] if p.exists() else []
@@ -47,7 +47,7 @@ if __name__ == "__main__":
         print(json.dumps({"train_examples":len(train),"dev_examples":len(dev),"test_examples":len(test),"model_name":cfg["model_name"],"report_to":cfg.get("report_to","none"),"resume_from_checkpoint":ns.resume_from_checkpoint,"dry_run":True}, ensure_ascii=False)); sys.exit(0)
     try:
         import numpy as np, torch
-        from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, EarlyStoppingCallback, DataCollatorWithPadding
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, EarlyStoppingCallback
         from datasets import Dataset
     except Exception as e:
         raise RuntimeError("Install requirements-train.txt to train assertion model") from e
@@ -56,13 +56,13 @@ if __name__ == "__main__":
     model=AutoModelForSequenceClassification.from_pretrained(cfg["model_name"], num_labels=3, problem_type="multi_label_classification", label2id=LABEL2ID, id2label={str(k):v for k,v in ID2LABEL.items()})
     register_special_tokens(tokenizer, model)
     def encode(examples):
-        enc=tokenizer(examples["input_text"], truncation=True, padding=False, max_length=int(cfg["max_length"]))
-        enc["labels"]=examples["labels"]; return enc
+        rows=[{"input_text":t, "labels":l} for t,l in zip(examples["input_text"], examples["labels"])]
+        return tokenize_examples(rows, tokenizer, max_length=int(cfg["max_length"]), padding=False, truncation=True)
     train_ds=Dataset.from_list(train).map(encode, batched=True, remove_columns=list(train[0].keys()))
     dev_ds=Dataset.from_list(dev).map(encode, batched=True, remove_columns=list(dev[0].keys()))
     args=TrainingArguments(**training_args_kwargs(TrainingArguments,cfg))
     callbacks=[EarlyStoppingCallback(early_stopping_patience=int(cfg.get("early_stopping_patience",2)))]
-    trainer=Trainer(**trainer_kwargs(Trainer, model, args, train_ds, dev_ds, tokenizer, DataCollatorWithPadding(tokenizer), compute_metrics_from_logits, callbacks))
+    trainer=Trainer(**trainer_kwargs(Trainer, model, args, train_ds, dev_ds, tokenizer, FloatMultilabelCollator(tokenizer), compute_metrics_from_logits, callbacks))
     trainer.train(resume_from_checkpoint=ns.resume_from_checkpoint)
     out=Path(cfg["output_dir"]); out.mkdir(parents=True, exist_ok=True); trainer.save_model(str(out)); tokenizer.save_pretrained(str(out))
     dev_logits=trainer.predict(dev_ds).predictions; dev_gold=[ex["labels"] for ex in dev]
