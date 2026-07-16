@@ -6,85 +6,99 @@
     "KẾT_QUẢ_XÉT_NGHIỆM": 502,
     "THUỐC": 505
   },
-  "unique_forms_by_type": {
-    "CHẨN_ĐOÁN": 502,
-    "KẾT_QUẢ_XÉT_NGHIỆM": 501,
-    "THUỐC": 502,
-    "TRIỆU_CHỨNG": 504,
-    "TÊN_XÉT_NGHIỆM": 501
+  "raw_surface_forms": {
+    "CHẨN_ĐOÁN": 24,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 23,
+    "THUỐC": 24,
+    "TRIỆU_CHỨNG": 22,
+    "TÊN_XÉT_NGHIỆM": 18
   },
-  "top_mention_share_by_type": {
-    "CHẨN_ĐOÁN": 0.003968253968253968,
-    "TRIỆU_CHỨNG": 0.015533980582524271,
-    "TÊN_XÉT_NGHIỆM": 0.00398406374501992,
-    "KẾT_QUẢ_XÉT_NGHIỆM": 0.00398406374501992,
-    "THUỐC": 0.005940594059405941
+  "canonical_concepts": {
+    "CHẨN_ĐOÁN": 22,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 16,
+    "THUỐC": 22,
+    "TRIỆU_CHỨNG": 19,
+    "TÊN_XÉT_NGHIỆM": 16
   },
-  "top_mentions_by_type": {
+  "context_template_count": {
+    "CHẨN_ĐOÁN": 10,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 6,
+    "THUỐC": 9,
+    "TRIỆU_CHỨNG": 21,
+    "TÊN_XÉT_NGHIỆM": 6
+  },
+  "top_canonical_share_by_type": {
+    "CHẨN_ĐOÁN": 0.0496031746031746,
+    "TRIỆU_CHỨNG": 0.06601941747572816,
+    "TÊN_XÉT_NGHIỆM": 0.06772908366533864,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 0.06772908366533864,
+    "THUỐC": 0.04950495049504951
+  },
+  "top_concepts_by_type": {
     "CHẨN_ĐOÁN": {
-      "tăng huyết áp": 2,
-      "đái tháo đường": 2,
-      "đái tháo đường type 361": 1,
-      "suy tim type 445": 1,
-      "đái tháo đường type 461": 1,
-      "cường giáp type 233": 1,
-      "viêm phổi type 183": 1,
-      "loãng xương type 339": 1,
-      "trầm-cảm-type-238": 1,
-      "tăng huyết áp type 180": 1
+      "dx_diabetes": 25,
+      "dx_hf": 25,
+      "dx_hyperthyroid": 25,
+      "dx_pneumonia": 25,
+      "dx_osteoporosis": 25,
+      "dx_depression": 25,
+      "dx_htn": 25,
+      "dx_gout": 25,
+      "dx_gastritis": 25,
+      "dx_hypothyroid": 25
     },
     "KẾT_QUẢ_XÉT_NGHIỆM": {
-      "7,2 mmol/l": 2,
-      "207.6 mmol/l": 1,
-      "406.5 mmol/l": 1,
-      "287.6 mmol/l": 1,
-      "356.5 mmol/l": 1,
-      "393.2 mmol/l": 1,
-      "120.9 mmol/l": 1,
-      "387.6 mmol/l": 1,
-      "281.0 mmol/l": 1,
-      "360.9 mmol/l": 1
+      "result_hba1c_pct": 34,
+      "result_crp_mgl": 34,
+      "result_inr": 34,
+      "result_wbc_gl": 34,
+      "result_glucose_mmol": 34,
+      "result_creatinine": 33,
+      "result_decreased": 33,
+      "result_hb": 33,
+      "result_ast": 33,
+      "result_high": 33
     },
     "THUỐC": {
-      "amlodipine": 3,
-      "amlodipine 5mg uống sáng": 2,
-      "dapagliflozin-299": 1,
-      "lisinopril-445": 1,
-      "zoloft-068": 1,
-      "amoxicillin-310": 1,
-      "amoxicillin-435": 1,
-      "budesonide-263": 1,
-      "ibuprofen-457": 1,
-      "spironolactone-290": 1
+      "drug_prozac": 25,
+      "drug_aspirin": 25,
+      "drug_omeprazole": 25,
+      "drug_amoxicillin": 25,
+      "drug_spironolactone": 25,
+      "drug_losartan": 25,
+      "drug_clopidogrel": 25,
+      "drug_amlodipine": 25,
+      "drug_warfarin": 25,
+      "drug_azithro": 25
     },
     "TRIỆU_CHỨNG": {
-      "ho khan": 8,
-      "met": 3,
-      "sốt": 2,
-      "đau ngực": 2,
-      "ngứa mức 438": 1,
-      "sốt mức 240": 1,
-      "đau ngực mức 403": 1,
-      "sụt cân mức 412": 1,
-      "ho khan mức 201": 1,
-      "sụt cân mức 212": 1
+      "sym_chest_pain": 34,
+      "sym_fever": 34,
+      "sym_dyspnea": 34,
+      "sym_fatigue": 34,
+      "sym_dry_cough": 34,
+      "sym_edema": 33,
+      "sym_dizziness": 33,
+      "sym_nausea": 33,
+      "sym_wheeze": 33,
+      "sym_chills": 33
     },
     "TÊN_XÉT_NGHIỆM": {
-      "glucose": 2,
-      "procalcitonin-278": 1,
-      "triglyceride-033": 1,
-      "ure-209": 1,
-      "d-dimer-399": 1,
-      "alt-266": 1,
-      "wbc-224": 1,
-      "triglyceride-493": 1,
-      "triglyceride-393": 1,
-      "hdl-c-052": 1
+      "test_glucose": 34,
+      "test_crp": 34,
+      "test_inr": 34,
+      "test_hba1c": 34,
+      "test_wbc": 34,
+      "test_hb": 33,
+      "test_bilirubin": 33,
+      "test_ure": 33,
+      "test_ldl": 33,
+      "test_tg": 33
     }
   },
   "source_composition": {
-    "synthetic_v1": 12,
-    "targeted_synthetic_v2": 2500
+    "existing_synthetic": 12,
+    "targeted_synthetic": 2500
   },
   "class_imbalance_ratio": 1.0258964143426295,
   "duplicate_records": 0,

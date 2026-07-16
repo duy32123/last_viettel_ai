@@ -11,3 +11,6 @@ model_weights/
 *.pth
 *.bin
 *.safetensors
+
+# Phase 5F generated corpus (rebuild locally after audit)
+data/processed/train.v2.balanced.jsonl

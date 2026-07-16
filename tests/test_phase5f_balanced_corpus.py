@@ -1,7 +1,9 @@
-import json
+import json, re
 from pathlib import Path
-from src.data.balanced_ner_corpus import BalanceConfig, apply_source_target_constraints, assert_balanced_gate, balanced_report, build_balanced_corpus, generate_targeted_synthetic, source_target_allowed
+from src.data.balanced_ner_corpus import BalanceConfig, INVENTORY, apply_source_target_constraints, assert_balanced_gate, balanced_report, build_balanced_corpus, canonical_surface, generate_targeted_synthetic, source_target_allowed
 from src.data.dataset_schema import VALID_TYPES
+
+FAKE_PATTERNS=[re.compile(r"-\d{3}$"), re.compile(r"\btype \d{3}\b", re.I), re.compile(r"\bmức \d{3}\b", re.I)]
 
 
 def test_source_target_constraints():
@@ -19,9 +21,14 @@ def test_apply_source_target_constraints_drops_invalid_qwen_mapping():
     assert apply_source_target_constraints(rec) is None
 
 
+def test_canonical_surface_normalizes_numbers_case_and_punctuation():
+    assert canonical_surface('HbA1c') == canonical_surface('HBA1C')
+    assert canonical_surface('7.2 mmol/L') == canonical_surface('8.1 mmol/L')
+    assert canonical_surface('glucose!') == canonical_surface('GLUCOSE')
 
-def test_targeted_synthetic_offsets_and_surface_diversity():
-    cfg=BalanceConfig(min_entities_per_type=25, min_unique_mentions_per_type=10, min_unique_mentions_drug_diagnosis=10, max_top_mention_share=0.2, audit_samples_per_type=2)
+
+def test_targeted_synthetic_offsets_and_real_inventory_diversity():
+    cfg=BalanceConfig(min_entities_per_type=500, min_canonical_concepts_per_type=15, min_canonical_concepts_drug_diagnosis=20, max_top_canonical_share=0.07, audit_samples_per_type=2)
     rows=generate_targeted_synthetic(cfg)
     seen_types={e['type'] for r in rows for e in r['entities']}
     assert seen_types == VALID_TYPES
@@ -33,7 +40,13 @@ def test_targeted_synthetic_offsets_and_surface_diversity():
             assert r['source_split'] == 'train'
             assert 0 <= e['start'] < e['end'] <= len(r['text'])
             assert r['text'][e['start']:e['end']] == e['text']
+            assert not any(p.search(e['text']) for p in FAKE_PATTERNS)
+            assert e['metadata']['concept_id'] in {cid for vals in INVENTORY.values() for cid, _ in vals}
     report=balanced_report(rows)
+    assert report['entity_count_by_type']['THUỐC'] == 500
+    assert report['canonical_concepts']['THUỐC'] == len(INVENTORY['THUỐC'])
+    assert report['canonical_concepts']['THUỐC'] < 100
+    assert report['context_template_count']['THUỐC'] < 20
     assert_balanced_gate(report, cfg)
 
 
@@ -43,7 +56,7 @@ def test_build_balanced_corpus_train_only_and_gold_dev_independent(tmp_path):
     train_syn.write_text(json.dumps({'id':'dev_leak','text':'dev text','entities':[],'relations':[],'source':'fixture','source_split':'dev','license':'fixture','metadata':{}}, ensure_ascii=False)+'\n', encoding='utf-8')
     output=tmp_path/'processed'/'train.v2.balanced.jsonl'; audit=tmp_path/'annotation'/'audit_v2.todo.jsonl'; report_path=tmp_path/'processed'/'balanced_v2_report.json'
     gold=tmp_path/'annotation'/'gold_dev.todo.jsonl'; gold.parent.mkdir(parents=True); gold.write_text('gold sentinel\n', encoding='utf-8')
-    cfg=BalanceConfig(min_entities_per_type=20, min_unique_mentions_per_type=8, min_unique_mentions_drug_diagnosis=8, max_top_mention_share=0.2, audit_samples_per_type=3)
+    cfg=BalanceConfig(min_entities_per_type=60, min_canonical_concepts_per_type=15, min_canonical_concepts_drug_diagnosis=20, max_top_canonical_share=0.07, audit_samples_per_type=3)
     report=build_balanced_corpus(train_silver, train_syn, output, audit, report_path, cfg)
     rows=[json.loads(l) for l in output.read_text(encoding='utf-8').splitlines()]
     assert rows and all(r['source_split'] == 'train' for r in rows)
@@ -52,15 +65,15 @@ def test_build_balanced_corpus_train_only_and_gold_dev_independent(tmp_path):
     audit_rows=[json.loads(l) for l in audit.read_text(encoding='utf-8').splitlines()]
     assert len(audit_rows) == 3 * len(VALID_TYPES)
     assert all(r['review_status'] == 'pending' and not r['metadata']['gold_evaluation'] for r in audit_rows)
-    assert report['class_imbalance_ratio'] <= 3
+    assert report['source_composition']['targeted_synthetic'] > 0
 
 
 def test_balanced_gate_blocks_top_share_and_missing_type():
-    cfg=BalanceConfig(min_entities_per_type=2, min_unique_mentions_per_type=2, min_unique_mentions_drug_diagnosis=2, max_top_mention_share=0.51)
-    bad={'entity_count_by_type':{'THUỐC':2},'unique_forms_by_type':{'THUỐC':1},'top_mention_share_by_type':{'THUỐC':1.0},'class_imbalance_ratio':None,'duplicate_records':0,'invalid_offsets':0}
+    cfg=BalanceConfig(min_entities_per_type=2, min_canonical_concepts_per_type=2, min_canonical_concepts_drug_diagnosis=2, max_top_canonical_share=0.51)
+    bad={'entity_count_by_type':{'THUỐC':2},'canonical_concepts':{'THUỐC':1},'top_canonical_share_by_type':{'THUỐC':1.0},'class_imbalance_ratio':None,'duplicate_records':0,'invalid_offsets':0}
     try:
         assert_balanced_gate(bad, cfg)
     except ValueError as exc:
-        assert 'minimum' in str(exc) or 'top mention share' in str(exc)
+        assert 'minimum' in str(exc) or 'top canonical share' in str(exc)
     else:
         raise AssertionError('gate should fail')
