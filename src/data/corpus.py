@@ -3,7 +3,8 @@ import hashlib, json, shutil
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
-from src.data.adapters.span_jsonl import load_span_jsonl, DEFAULT_MAPPINGS
+from src.data.adapters.span_jsonl import load_span_jsonl, DEFAULT_MAPPINGS as SPAN_MAPPINGS
+from src.data.adapters.token_bio import load_token_bio_jsonl, DEFAULT_MAPPINGS as BIO_MAPPINGS
 from src.data.synthetic.generator import ann_hash
 from src.data.dataset_schema import validate_record, VALID_TYPES
 
@@ -68,8 +69,11 @@ def build_corpus(config_path: Path) -> dict[str, Any]:
         if not local.exists():
             entry['status']='skipped_missing_local_data'; manifest.append(entry); continue
         entry['checksum_sha256']=sha256(local)
-        mapping=ds.get('mapping') or DEFAULT_MAPPINGS.get(ds.get('adapter',''), {})
-        if ds.get('adapter') in {'vimq','vietmed_ner'}:
+        adapter=ds.get('adapter')
+        mapping=ds.get('mapping') or BIO_MAPPINGS.get(adapter, SPAN_MAPPINGS.get(adapter, {}))
+        if adapter in {'vimq','vietmed_ner','phoner_covid19'} and ds.get('schema') == 'token_bio':
+            rows, report=load_token_bio_jsonl(local, ds['name'], ds.get('split','train'), terms, mapping)
+        elif adapter in {'vimq','vietmed_ner'}:
             rows, report=load_span_jsonl(local, ds['name'], ds.get('split','train'), terms, mapping, synthetic=False)
         else:
             entry['status']='skipped_unsupported_adapter'; manifest.append(entry); continue
@@ -83,18 +87,23 @@ def build_corpus(config_path: Path) -> dict[str, Any]:
     for r in synthetic:
         r.setdefault('metadata', {})['synthetic']=True
         r['metadata'].setdefault('upstream_id', r['id'])
-    combined, combined_dups=dedupe(train_real + synthetic)
+    safe_train=[]
+    for r in train_real:
+        rr=dict(r); rr["entities"]=[e for e in r.get("entities", []) if e.get("type") in VALID_TYPES]
+        if rr["entities"]: safe_train.append(rr)
+    combined, combined_dups=dedupe(safe_train + synthetic)
     pipeline_test=read_jsonl(Path(cfg.get('pipeline_test_source','data/processed/test.jsonl')))
     for r in pipeline_test:
         r.setdefault('metadata', {})['synthetic']=True
         r['metadata']['gold_evaluation']=False
     gold_todo=build_review_queue(dev_prov or train_real, int(cfg.get('gold_dev_sample_size', 100)))
     write_jsonl(out_dir/'train.real.jsonl', train_real)
+    write_jsonl(out_dir/'train.external.jsonl', safe_train)
     write_jsonl(out_dir/'train.combined.jsonl', combined)
     write_jsonl(out_dir/'dev.provisional.jsonl', dev_prov)
     write_jsonl(ann_dir/'gold_dev.todo.jsonl', gold_todo)
     write_jsonl(out_dir/'pipeline_test.jsonl', pipeline_test)
-    report=corpus_report({'train.real':train_real,'dev.provisional':dev_prov,'train.combined':combined,'pipeline_test':pipeline_test}, reports, combined_dups, gold_todo)
+    report=corpus_report({'train.real':train_real,'train.external':safe_train,'dev.provisional':dev_prov,'train.combined':combined,'pipeline_test':pipeline_test}, reports, combined_dups, gold_todo)
     (out_dir/'real_corpus_manifest.json').write_text(json.dumps({'sources':manifest,'label_reports':reports,'report':report}, ensure_ascii=False, indent=2), encoding='utf-8')
     return report
 

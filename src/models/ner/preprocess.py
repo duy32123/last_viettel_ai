@@ -101,6 +101,11 @@ def decode_feature_spans(feature: dict[str,Any], label_ids: list[int], id2label:
     for i in label_ids:
         if i == -100: labs.append(-100)
         else: labs.append(mapping.get(i, mapping.get(str(i))))
-    spans=labels_to_spans(feature["offset_mapping"], labs)
-    for s in spans: s["text"]=feature["text"][s["start"]:s["end"]]
-    return spans
+    spans=labels_to_spans(feature["offset_mapping"], labs, len(feature["text"]))
+    out=[]
+    for s in spans:
+        if not (0 <= s["start"] < s["end"] <= len(feature["text"])): continue
+        s["text"]=feature["text"][s["start"]:s["end"]]
+        if not s["text"]: continue
+        out.append(s)
+    return out

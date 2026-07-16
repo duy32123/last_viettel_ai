@@ -16,6 +16,52 @@ def _cfg_bool(cfg, name, fallback=False):
     return bool(cfg.get(name, fallback))
 
 
+def training_args_kwargs(TrainingArguments, cfg, out, interval):
+    kwargs=dict(
+        output_dir=str(out),
+        learning_rate=float(cfg["learning_rate"]),
+        num_train_epochs=float(cfg.get("epochs", 1)),
+        max_steps=int(cfg.get("max_steps", -1)),
+        per_device_train_batch_size=_cfg_int(cfg, "per_device_train_batch_size", cfg.get("batch_size", 1)),
+        per_device_eval_batch_size=_cfg_int(cfg, "per_device_eval_batch_size", cfg.get("batch_size", 1)),
+        gradient_accumulation_steps=int(cfg["gradient_accumulation_steps"]),
+        warmup_ratio=float(cfg["warmup_ratio"]),
+        weight_decay=float(cfg["weight_decay"]),
+        fp16=_cfg_bool(cfg,"fp16",False),
+        bf16=_cfg_bool(cfg,"bf16",False),
+        eval_steps=cfg.get("eval_steps"),
+        save_strategy=interval,
+        save_steps=cfg.get("save_steps"),
+        logging_steps=int(cfg.get("logging_steps", 50)),
+        save_total_limit=cfg.get("save_total_limit"),
+        load_best_model_at_end=True,
+        metric_for_best_model=cfg.get("metric_for_best_model", "strict_span_f1"),
+        greater_is_better=True,
+        seed=int(cfg.get("seed",13)),
+        remove_unused_columns=False,
+        gradient_checkpointing=_cfg_bool(cfg,"gradient_checkpointing",False),
+        report_to="none",
+    )
+    import inspect
+    params=inspect.signature(TrainingArguments.__init__).parameters
+    if "eval_strategy" in params:
+        kwargs["eval_strategy"]=interval
+    else:
+        kwargs["evaluation_strategy"]=interval
+    return kwargs
+
+
+def trainer_kwargs(Trainer, model, args, train_dataset, eval_dataset, tok, collator, compute_metrics, callbacks):
+    kwargs=dict(model=model, args=args, train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=collator, compute_metrics=compute_metrics, callbacks=callbacks)
+    import inspect
+    params=inspect.signature(Trainer.__init__).parameters
+    if "processing_class" in params:
+        kwargs["processing_class"]=tok
+    else:
+        kwargs["tokenizer"]=tok
+    return kwargs
+
+
 def group_gold(features):
     docs={}
     for f in features:
@@ -102,33 +148,9 @@ def main():
         model.gradient_checkpointing_enable()
     out=Path(cfg["output_dir"]); out.mkdir(parents=True, exist_ok=True)
     interval = "steps" if cfg.get("max_steps") else "epoch"
-    args=TrainingArguments(
-        output_dir=str(out),
-        learning_rate=float(cfg["learning_rate"]),
-        num_train_epochs=float(cfg.get("epochs", 1)),
-        max_steps=int(cfg.get("max_steps", -1)),
-        per_device_train_batch_size=_cfg_int(cfg, "per_device_train_batch_size", cfg.get("batch_size", 1)),
-        per_device_eval_batch_size=_cfg_int(cfg, "per_device_eval_batch_size", cfg.get("batch_size", 1)),
-        gradient_accumulation_steps=int(cfg["gradient_accumulation_steps"]),
-        warmup_ratio=float(cfg["warmup_ratio"]),
-        weight_decay=float(cfg["weight_decay"]),
-        fp16=_cfg_bool(cfg,"fp16",False),
-        bf16=_cfg_bool(cfg,"bf16",False),
-        evaluation_strategy=interval,
-        eval_steps=cfg.get("eval_steps"),
-        save_strategy=interval,
-        save_steps=cfg.get("save_steps"),
-        logging_steps=int(cfg.get("logging_steps", 50)),
-        save_total_limit=cfg.get("save_total_limit"),
-        load_best_model_at_end=True,
-        metric_for_best_model=cfg.get("metric_for_best_model", "strict_span_f1"),
-        greater_is_better=True,
-        seed=int(cfg.get("seed",13)),
-        remove_unused_columns=False,
-        gradient_checkpointing=_cfg_bool(cfg,"gradient_checkpointing",False),
-    )
+    args=TrainingArguments(**training_args_kwargs(TrainingArguments, cfg, out, interval))
     collator=DataCollatorForTokenClassification(tok)
-    trainer=Trainer(model=model, args=args, train_dataset=FeatureDataset(train_features), eval_dataset=FeatureDataset(dev_features), tokenizer=tok, data_collator=collator, compute_metrics=build_compute_metrics(dev_features, model.config.id2label), callbacks=[EarlyStoppingCallback(early_stopping_patience=int(cfg.get("early_stopping_patience",2)))])
+    trainer=Trainer(**trainer_kwargs(Trainer, model, args, FeatureDataset(train_features), FeatureDataset(dev_features), tok, collator, build_compute_metrics(dev_features, model.config.id2label), [EarlyStoppingCallback(early_stopping_patience=int(cfg.get("early_stopping_patience",2)))]))
     sha=subprocess.run(["git","rev-parse","HEAD"], text=True, capture_output=True).stdout.strip()
     (out/"training_manifest.json").write_text(json.dumps({"config":cfg,"gate":gate.__dict__,"data_quality_report":report,"train_preprocess_stats":train_stats.__dict__,"dev_preprocess_stats":dev_stats.__dict__,"git_commit":sha}, ensure_ascii=False, indent=2), encoding="utf-8")
     trainer.train(resume_from_checkpoint=ns.resume_from_checkpoint or cfg.get("resume_from_checkpoint"))
