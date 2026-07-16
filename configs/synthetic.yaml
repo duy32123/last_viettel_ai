@@ -1,0 +1,1 @@
+{"seed": 13, "output_dir": "data/processed", "counts": {"train": 12, "dev": 4, "test": 4}, "kb_paths": {"diagnosis": ["data/processed/kb/icd.jsonl", "data/processed/kb/icd10_seed.jsonl"], "drug": ["data/processed/kb/rxnorm.jsonl", "data/processed/kb/rxnorm_seed.jsonl"]}}

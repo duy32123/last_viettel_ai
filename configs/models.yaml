@@ -1,0 +1,21 @@
+ner:
+  base_model: FacebookAI/xlm-roberta-large
+  task: token_classification
+  label_scheme: BILOU
+assertion:
+  base_model: FacebookAI/xlm-roberta-large
+  labels: [isNegated, isFamily, isHistorical]
+retrieval:
+  lexical: BM25
+  dense_model: BAAI/bge-m3
+  fusion: {method: reciprocal_rank_fusion, k: 60}
+  indexes: [icd, rxnorm]
+reranker:
+  model: BAAI/bge-reranker-v2-m3
+  top_n: 50
+relation_extraction:
+  base_model: FacebookAI/xlm-roberta-large
+  enabled_without_official_schema: false
+llm:
+  model: Qwen/Qwen3-4B-Instruct-2507
+  enabled_in_scoring_pipeline: false

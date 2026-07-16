@@ -1,0 +1,13 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+data/raw/
+data/cache/
+cache/
+checkpoints/
+models/
+model_weights/
+*.pt
+*.pth
+*.bin
+*.safetensors

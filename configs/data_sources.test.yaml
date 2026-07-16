@@ -1,0 +1,7 @@
+{
+  "output_dir": "data/processed/kb",
+  "sources": [
+    {"name":"organizer_fixture_icd","kind":"icd_csv","terminology":"ICD-10","version":"fixture-2026","path":"tests/fixtures/kb/icd_fixture.csv","verified":false,"url":"local fixture","license":"test-only"},
+    {"name":"rxnorm_fixture","kind":"rxnorm_csv","version":"fixture-2026","path":"tests/fixtures/kb/rxnorm_fixture.csv","verified":false,"url":"local fixture","license":"test-only"}
+  ]
+}
