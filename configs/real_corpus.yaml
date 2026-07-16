@@ -1,0 +1,49 @@
+{
+  "output_dir": "data/processed",
+  "annotation_dir": "data/annotation",
+  "synthetic_train_path": "data/processed/train.jsonl",
+  "pipeline_test_source": "data/processed/test.jsonl",
+  "gold_dev_sample_size": 100,
+  "datasets": [
+    {
+      "name": "VietMed-NER_MultiMed",
+      "adapter": "vietmed_ner",
+      "source_url": "https://github.com/leduckhai/MultiMed/tree/master/VietMed-NER",
+      "upstream_commit": "unresolved_without_local_clone_or_api_access",
+      "license_terms": "upstream README says public code/data/models, but no explicit redistribution license found in this environment; do not commit imported records",
+      "redistribution_allowed": false,
+      "local_path": "data/raw/multimed/vietmed_ner_train.jsonl",
+      "split": "train",
+      "mapping": {
+        "DRUG": "THUỐC",
+        "MEDICINE": "THUỐC",
+        "SYMPTOM": "TRIỆU_CHỨNG",
+        "DISEASE": "CHẨN_ĐOÁN",
+        "TEST_NAME": "TÊN_XÉT_NGHIỆM",
+        "TEST_RESULT": "KẾT_QUẢ_XÉT_NGHIỆM",
+        "SYMPTOM_AND_DISEASE": "UNMAPPED",
+        "MEDICAL_PROCEDURE": "UNMAPPED"
+      }
+    },
+    {
+      "name": "ViMQ",
+      "adapter": "vimq",
+      "source_url": "https://github.com/tadeephuy/ViMQ",
+      "upstream_commit": "unresolved_without_local_clone_or_api_access",
+      "license_terms": "GitHub README has no explicit redistribution license in this environment; paper describes dataset labels; do not commit imported records",
+      "redistribution_allowed": false,
+      "local_path": "data/raw/vimq/train.jsonl",
+      "split": "train"
+    },
+    {
+      "name": "PhoNER_COVID19",
+      "adapter": "phoner_covid19_native",
+      "source_url": "https://github.com/VinAIResearch/PhoNER_COVID19",
+      "upstream_commit": "unresolved_without_local_clone_or_api_access",
+      "license_terms": "research/educational terms must be checked upstream before redistribution; SYMPTOM_AND_DISEASE remains UNMAPPED",
+      "redistribution_allowed": false,
+      "local_path": "data/raw/phoner_covid19/train.txt",
+      "split": "train"
+    }
+  ]
+}

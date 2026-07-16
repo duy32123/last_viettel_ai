@@ -1,0 +1,2 @@
+{"id":"vimq1","text":"Bé uống Panadol nhưng vẫn sốt và cần chụp X-quang?","entities":[{"start":8,"end":15,"label":"DRUG","text":"Panadol"},{"start":26,"end":29,"label":"SYMPTOM_AND_DISEASE","text":"sốt"},{"start":37,"end":49,"label":"MEDICAL_PROCEDURE","text":"chụp X-quang"}]}
+{"id":"vimq2","text":"Tôi đau bụng sau khi dùng Topiramate.","entities":[{"start":4,"end":12,"label":"SYMPTOM_AND_DISEASE","text":"đau bụng"},{"start":26,"end":36,"label":"DRUG","text":"Topiramate"}]}

@@ -1,0 +1,2 @@
+{"id":"vm1","text":"Bệnh nhân ho khan, xét nghiệm glucose 7 mmol/l.","entities":[{"start":10,"end":17,"label":"SYMPTOM","text":"ho khan"},{"start":30,"end":37,"label":"TEST_NAME","text":"glucose"},{"start":38,"end":46,"label":"TEST_RESULT","text":"7 mmol/l"}]}
+{"id":"vm2","text":"Chẩn đoán tăng huyết áp, dùng amlodipine.","entities":[{"start":10,"end":23,"label":"DISEASE","text":"tăng huyết áp"},{"start":30,"end":40,"label":"DRUG","text":"amlodipine"}]}
