@@ -93,3 +93,61 @@ def test_synthetic_candidate_strict_non_strict_and_verified_value(tmp_path):
             if c["code"] == "I10": assert c["verified"] is True
     with pytest.raises(ValueError, match="missing KB candidate"):
         sample(1, "history_drug", {"diagnosis":{},"drug":{}}, strict_candidates=True)
+
+
+def test_chunk_boundary_partial_entity_masked_once_no_contradictory_o():
+    text="aaaa glucose bbbb"
+    start=text.index("glucose"); end=start+7
+    features, stats=preprocess_records([rec(text, [(start,end,"TÊN_XÉT_NGHIỆM")])], CharTokenizer(), max_length=9, stride=2)
+    full_chunks=[]; partial_chunks=[]
+    for f in features:
+        overlap=[i for i,(s,e) in enumerate(f["offset_mapping"]) if s!=e and max(s,start) < min(e,end)]
+        if not overlap:
+            continue
+        labels=[f["labels"][i] for i in overlap]
+        if f["offset_mapping"][overlap[0]][0] == start and f["offset_mapping"][overlap[-1]][1] == end:
+            full_chunks.append(labels)
+        else:
+            partial_chunks.append(labels)
+            assert all(l == -100 for l in labels)
+            assert LABEL2ID["O"] not in labels
+    assert full_chunks, "at least one chunk must fully supervise the entity"
+    assert partial_chunks, "at least one chunk must mask a partial entity"
+    assert any(ID2LABEL[l] == "B-TÊN_XÉT_NGHIỆM" for labels in full_chunks for l in labels if l != -100)
+    assert stats.dropped_boundary_entities == 0
+    assert stats.partial_entity_chunks >= 1
+
+
+def test_full_gate_fails_current_synthetic_data_but_smoke_gate_passes(tmp_path):
+    generate(13,{"train":8,"dev":8,"test":4},tmp_path, None, strict_candidates=False)
+    report=build_quality_report([tmp_path/"train.jsonl", tmp_path/"dev.jsonl", tmp_path/"test.jsonl"])
+    from src.data.quality import load_gate_config
+    assert_data_gate(report, load_gate_config("configs/data_gate.smoke.yaml"))
+    with pytest.raises(ValueError, match="non-synthetic|not enough|gold|official"):
+        assert_data_gate(report, load_gate_config("configs/data_gate.full.yaml"))
+
+
+def test_trainer_compute_metrics_exact_span_integration():
+    from scripts.train_ner import build_compute_metrics
+    text="sốt"
+    feature={"record_id":"r1","text":text,"offset_mapping":[(0,0),(0,1),(1,2),(2,3),(0,0)],"gold_entities":[{"start":0,"end":3,"text":"sốt","type":"TRIỆU_CHỨNG"}]}
+    class EvalPred:
+        predictions=None
+    pred_ids=[0, LABEL2ID["B-TRIỆU_CHỨNG"], LABEL2ID["I-TRIỆU_CHỨNG"], LABEL2ID["L-TRIỆU_CHỨNG"], 0]
+    class FakePredictions:
+        def __init__(self, ids): self.ids=ids
+        def argmax(self, axis=-1): return [FakeIds(self.ids)]
+    class FakeIds(list):
+        def tolist(self): return list(self)
+    ep=EvalPred(); ep.predictions=FakePredictions(pred_ids)
+    m=build_compute_metrics([feature], {str(k):v for k,v in ID2LABEL.items()})(ep)
+    assert m["strict_span_f1"] == 1.0
+
+
+def test_merge_conflicting_types_same_boundary_keeps_highest_score():
+    merged=merge_chunk_predictions([
+        [{"start":0,"end":3,"type":"TRIỆU_CHỨNG","score":0.4}],
+        [{"start":0,"end":3,"type":"CHẨN_ĐOÁN","score":0.9}],
+    ])
+    assert len(merged) == 1
+    assert merged[0]["type"] == "CHẨN_ĐOÁN"

@@ -4,6 +4,14 @@
     "synthetic_v1::test": 4,
     "synthetic_v1::train": 12
   },
+  "documents_by_split": {
+    "dev": 4,
+    "test": 4,
+    "train": 12
+  },
+  "sources": {
+    "synthetic_v1": 20
+  },
   "entities_by_type": {
     "CHẨN_ĐOÁN": 9,
     "KẾT_QUẢ_XÉT_NGHIỆM": 5,
@@ -46,5 +54,9 @@
     "TRIỆU_CHỨNG": 4,
     "TÊN_XÉT_NGHIỆM": 1,
     "KẾT_QUẢ_XÉT_NGHIỆM": 1
-  }
+  },
+  "dev_gold_evaluation": {
+    "not_gold": 4
+  },
+  "synthetic_test_not_gold_records": 4
 }
