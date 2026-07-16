@@ -1,5 +1,7 @@
 # External data sources
 
-PhoNER_COVID19: official repository is recorded in `configs/datasets.yaml`. It is Vietnamese COVID/news medical NER; labels unrelated to the target schema map to `IGNORE`. Verify upstream license before downloading.
+PhoNER_COVID19 is configured with a native BIO/CoNLL adapter. Its broad `SYMPTOM_AND_DISEASE` label is mapped to `UNMAPPED` in `configs/datasets.yaml` until a reviewed disease-vs-symptom split strategy exists; unrelated labels map to `IGNORE`.
 
-VietMed-NER in MultiMed and ViMQ are registered as potential sources with access/license notes. This PR does not download them or claim they cover assertion, linking, or relation training. Fixtures only validate adapter contracts.
+VietMed-NER (MultiMed) and ViMQ are registry-only entries with official URLs and license/access notes. They are not claimed as supported adapters, and the pipeline skips them unless user-provided local data plus an adapter are configured.
+
+The default production dataset config skips missing official/user-provided files. Test-only fixtures live under `tests/fixtures` and are wired through dedicated test config files instead of the production data-source config.

@@ -1,0 +1,64 @@
+{
+  "sources": [
+    {
+      "name": "VietMed-NER_MultiMed",
+      "source_url": "https://github.com/leduckhai/MultiMed/tree/master/VietMed-NER",
+      "upstream_commit": "unresolved_without_local_clone_or_api_access",
+      "license_terms": "upstream README says public code/data/models, but no explicit redistribution license found in this environment; do not commit imported records",
+      "redistribution": "not_committed_raw_or_processed",
+      "status": "skipped_missing_local_data"
+    },
+    {
+      "name": "ViMQ",
+      "source_url": "https://github.com/tadeephuy/ViMQ",
+      "upstream_commit": "unresolved_without_local_clone_or_api_access",
+      "license_terms": "GitHub README has no explicit redistribution license in this environment; paper describes dataset labels; do not commit imported records",
+      "redistribution": "not_committed_raw_or_processed",
+      "status": "skipped_missing_local_data"
+    },
+    {
+      "name": "PhoNER_COVID19",
+      "source_url": "https://github.com/VinAIResearch/PhoNER_COVID19",
+      "upstream_commit": "unresolved_without_local_clone_or_api_access",
+      "license_terms": "research/educational terms must be checked upstream before redistribution; SYMPTOM_AND_DISEASE remains UNMAPPED",
+      "redistribution": "not_committed_raw_or_processed",
+      "status": "skipped_missing_local_data"
+    }
+  ],
+  "label_reports": [],
+  "report": {
+    "record_counts": {
+      "train.real": 0,
+      "train.external": 0,
+      "dev.provisional": 0,
+      "train.combined": 12,
+      "pipeline_test": 4
+    },
+    "entity_counts": {
+      "CHẨN_ĐOÁN": 6,
+      "TRIỆU_CHỨNG": 22,
+      "TÊN_XÉT_NGHIỆM": 4,
+      "KẾT_QUẢ_XÉT_NGHIỆM": 4,
+      "THUỐC": 5
+    },
+    "mapping_counts": {
+      "direct_mapped": 41
+    },
+    "real_records": 0,
+    "synthetic_records": 16,
+    "duplicate_records_removed": 0,
+    "candidate_coverage": {
+      "with_candidate": 11,
+      "without_candidate": 30
+    },
+    "gold_dev": {
+      "approved": 0,
+      "pending": 0
+    },
+    "full_gate_blockers": [
+      "no real local dataset imported",
+      "no human-approved gold dev records"
+    ],
+    "label_reports": []
+  }
+}
