@@ -156,3 +156,77 @@ def test_negative_lab_context_controls_are_not_generated_as_results():
     assert '180 cm' not in result_texts
     assert '70 kg' not in result_texts
     assert all(e['type'] != 'THUỐC' for r in rows for e in r['entities'] if e['text'] == 'INR')
+
+
+def _span(text, surface, typ, score=0.9, occurrence=0):
+    pos=-1; start=0
+    for _ in range(occurrence+1):
+        pos=text.index(surface, start); start=pos+len(surface)
+    return {'start':pos,'end':pos+len(surface),'text':surface,'type':typ,'score':score}
+
+
+def test_phase5i_filter_drops_non_lab_measurement_false_positives():
+    from src.models.ner.inference import finalize_predictions, filter_non_lab_result_predictions
+    text='Bệnh nhân cao 1m70, nặng 70 kg.'
+    spans=[_span(text,'1m70','KẾT_QUẢ_XÉT_NGHIỆM'), _span(text,'70 kg','KẾT_QUẢ_XÉT_NGHIỆM')]
+    assert filter_non_lab_result_predictions(text, spans) == []
+    text='Uống thuốc 500 mg.'
+    assert finalize_predictions(text, [_span(text,'500 mg','KẾT_QUẢ_XÉT_NGHIỆM')]) == []
+    text='Giá giảm 15%.'
+    assert finalize_predictions(text, [_span(text,'15%','KẾT_QUẢ_XÉT_NGHIỆM')]) == []
+
+
+def test_phase5i_filter_keeps_lab_evidence_and_boundary_trim():
+    from src.models.ner.inference import finalize_predictions
+    text='Xét nghiệm HbA1c 8.1%. INR 2.5. CRP 20 mg/L; glucose 8.1 mmol/L. WBC 15 G/L.'
+    raw=[
+        _span(text,'HbA1c','TÊN_XÉT_NGHIỆM'), _span(text,'8.1%','KẾT_QUẢ_XÉT_NGHIỆM'),
+        _span(text,'INR','TÊN_XÉT_NGHIỆM'), _span(text,'2.5','KẾT_QUẢ_XÉT_NGHIỆM'),
+        _span(text,'CRP','TÊN_XÉT_NGHIỆM'), {'start':text.index('20 mg/L'),'end':text.index('20 mg/L')+len('20 mg/L;'),'text':'20 mg/L;','type':'KẾT_QUẢ_XÉT_NGHIỆM','score':0.9},
+        _span(text,'glucose','TÊN_XÉT_NGHIỆM'), _span(text,'8.1 mmol/L','KẾT_QUẢ_XÉT_NGHIỆM'),
+        _span(text,'WBC','TÊN_XÉT_NGHIỆM'), _span(text,'15 G/L','KẾT_QUẢ_XÉT_NGHIỆM'),
+    ]
+    out=finalize_predictions(text, raw)
+    assert {(s['text'],s['type']) for s in out} == {('HbA1c','TÊN_XÉT_NGHIỆM'),('8.1%','KẾT_QUẢ_XÉT_NGHIỆM'),('INR','TÊN_XÉT_NGHIỆM'),('2.5','KẾT_QUẢ_XÉT_NGHIỆM'),('CRP','TÊN_XÉT_NGHIỆM'),('20 mg/L','KẾT_QUẢ_XÉT_NGHIỆM'),('glucose','TÊN_XÉT_NGHIỆM'),('8.1 mmol/L','KẾT_QUẢ_XÉT_NGHIỆM'),('WBC','TÊN_XÉT_NGHIỆM'),('15 G/L','KẾT_QUẢ_XÉT_NGHIỆM')}
+    assert all(text[s['start']:s['end']] == s['text'] for s in out)
+
+
+def test_phase5i_unseen_labs_special_chars_and_multichunk_merge():
+    from src.models.ner.inference import finalize_predictions
+    text='Kết quả troponin 0.04 ng/mL, D-dimer 620 ng/mL, creatinine 1.3 mg/dL và Na+ cao.\nNgoài ra HbA1c 8.1%.'
+    chunks=[[
+        _span(text,'troponin','TÊN_XÉT_NGHIỆM'), _span(text,'0.04 ng/mL','KẾT_QUẢ_XÉT_NGHIỆM'),
+        _span(text,'D-dimer','TÊN_XÉT_NGHIỆM'), _span(text,'620 ng/mL','KẾT_QUẢ_XÉT_NGHIỆM'),
+        _span(text,'creatinine','TÊN_XÉT_NGHIỆM'), _span(text,'1.3 mg/dL','KẾT_QUẢ_XÉT_NGHIỆM')],
+        [_span(text,'Na+','TÊN_XÉT_NGHIỆM'), _span(text,'cao','KẾT_QUẢ_XÉT_NGHIỆM'), _span(text,'HbA1c','TÊN_XÉT_NGHIỆM'), _span(text,'8.1%','KẾT_QUẢ_XÉT_NGHIỆM')]]
+    out=finalize_predictions(text, chunks)
+    expected={'troponin','0.04 ng/mL','D-dimer','620 ng/mL','creatinine','1.3 mg/dL','Na+','cao','HbA1c','8.1%'}
+    assert {s['text'] for s in out} == expected
+    assert all(text[s['start']:s['end']] == s['text'] for s in out)
+
+
+def test_phase5i_deterministic_hard_suite_expected_20_entities():
+    from src.models.ner.inference import finalize_predictions
+    cases=[]
+    t='Xét nghiệm HbA1c 8.1%, CRP 20 mg/L và INR 2.5.'
+    cases.append((t, [_span(t,'HbA1c','TÊN_XÉT_NGHIỆM'), {'start':t.index('8.1%'),'end':t.index('8.1%')+len('8.1%,'),'text':'8.1%,','type':'KẾT_QUẢ_XÉT_NGHIỆM','score':.9}, _span(t,'CRP','TÊN_XÉT_NGHIỆM'), _span(t,'20 mg/L','KẾT_QUẢ_XÉT_NGHIỆM'), _span(t,'INR','TÊN_XÉT_NGHIỆM'), _span(t,'2.5','KẾT_QUẢ_XÉT_NGHIỆM')]))
+    t='Kết quả troponin 0.04 ng/mL, D-dimer 620 ng/mL, creatinine 1.3 mg/dL.'
+    cases.append((t, [_span(t,'troponin','TÊN_XÉT_NGHIỆM'), _span(t,'0.04 ng/mL','KẾT_QUẢ_XÉT_NGHIỆM'), _span(t,'D-dimer','TÊN_XÉT_NGHIỆM'), _span(t,'620 ng/mL','KẾT_QUẢ_XÉT_NGHIỆM'), _span(t,'creatinine','TÊN_XÉT_NGHIỆM'), _span(t,'1.3 mg/dL','KẾT_QUẢ_XÉT_NGHIỆM')]))
+    t='Bệnh nhân khó thở, chẩn đoán viêm phổi, dùng insulin. Glucose 8.1 mmol/L.'
+    cases.append((t, [_span(t,'khó thở','TRIỆU_CHỨNG'), _span(t,'viêm phổi','CHẨN_ĐOÁN'), _span(t,'insulin','THUỐC'), _span(t,'Glucose','TÊN_XÉT_NGHIỆM'), _span(t,'8.1 mmol/L','KẾT_QUẢ_XÉT_NGHIỆM')]))
+    t='Không ghi nhận đau ngực. Tiền sử tăng huyết áp, đang dùng amlodipine.'
+    cases.append((t, [_span(t,'đau ngực','TRIỆU_CHỨNG'), _span(t,'tăng huyết áp','CHẨN_ĐOÁN'), _span(t,'amlodipine','THUỐC')]))
+    t='Bệnh nhân cao 1m70, nặng 70 kg. Uống thuốc 500 mg. Giá giảm 15%.'
+    cases.append((t, [_span(t,'1m70','KẾT_QUẢ_XÉT_NGHIỆM'), _span(t,'70 kg','KẾT_QUẢ_XÉT_NGHIỆM'), _span(t,'500 mg','KẾT_QUẢ_XÉT_NGHIỆM'), _span(t,'15%','KẾT_QUẢ_XÉT_NGHIỆM')]))
+    predicted=[]; gold=[]
+    for text, spans in cases:
+        out=finalize_predictions(text, spans)
+        predicted.extend((text, s['start'], s['end'], s['type']) for s in out)
+        gold.extend((text, s['start'], s['end'], s['type']) for s in spans if s['type'] != 'KẾT_QUẢ_XÉT_NGHIỆM' or s['text'] not in {'1m70','70 kg','500 mg','15%'})
+    # Normalize gold boundary for the deliberately comma-swallowed 8.1%, input.
+    gold={(text, start, end-1 if text[start:end].endswith(',') else end, typ) for text,start,end,typ in gold}
+    pred=set(predicted)
+    assert len(gold) == 20
+    assert pred == gold
+    precision=len(pred & gold)/len(pred); recall=len(pred & gold)/len(gold); f1=2*precision*recall/(precision+recall)
+    assert (precision, recall, f1) == (1.0, 1.0, 1.0)
