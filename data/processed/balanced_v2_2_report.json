@@ -1,0 +1,117 @@
+{
+  "entity_count_by_type": {
+    "CHẨN_ĐOÁN": 504,
+    "TRIỆU_CHỨNG": 515,
+    "TÊN_XÉT_NGHIỆM": 617,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 517,
+    "THUỐC": 505
+  },
+  "raw_surface_forms": {
+    "CHẨN_ĐOÁN": 24,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 28,
+    "THUỐC": 24,
+    "TRIỆU_CHỨNG": 22,
+    "TÊN_XÉT_NGHIỆM": 31
+  },
+  "canonical_concepts": {
+    "CHẨN_ĐOÁN": 22,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 21,
+    "THUỐC": 22,
+    "TRIỆU_CHỨNG": 19,
+    "TÊN_XÉT_NGHIỆM": 27
+  },
+  "context_template_count": {
+    "CHẨN_ĐOÁN": 24,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 24,
+    "THUỐC": 25,
+    "TRIỆU_CHỨNG": 30,
+    "TÊN_XÉT_NGHIỆM": 76
+  },
+  "top_canonical_share_by_type": {
+    "CHẨN_ĐOÁN": 0.0496031746031746,
+    "TRIỆU_CHỨNG": 0.06601941747572816,
+    "TÊN_XÉT_NGHIỆM": 0.055105348460291734,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 0.058027079303675046,
+    "THUỐC": 0.04950495049504951
+  },
+  "top_concepts_by_type": {
+    "CHẨN_ĐOÁN": {
+      "dx_osteoporosis": 25,
+      "dx_dyslipidemia": 25,
+      "dx_htn": 25,
+      "dx_anemia": 25,
+      "dx_depression": 25,
+      "dx_hf": 25,
+      "dx_stone": 25,
+      "dx_sinusitis": 25,
+      "dx_obesity": 25,
+      "dx_diabetes": 25
+    },
+    "KẾT_QUẢ_XÉT_NGHIỆM": {
+      "result_crp_mgl": 30,
+      "result_inr": 30,
+      "result_hba1c_pct": 30,
+      "result_glucose_mmol": 25,
+      "result_potassium": 25,
+      "result_ast": 25,
+      "result_albumin": 25,
+      "result_hb": 25,
+      "result_ddimer": 25,
+      "result_wbc_gl": 25
+    },
+    "THUỐC": {
+      "drug_cefuroxime": 25,
+      "drug_salbutamol": 25,
+      "drug_furosemide": 25,
+      "drug_metformin": 25,
+      "drug_paracetamol": 25,
+      "drug_budesonide": 25,
+      "drug_atorvastatin": 25,
+      "drug_zoloft": 25,
+      "drug_aspirin": 25,
+      "drug_amoxicillin": 25
+    },
+    "TRIỆU_CHỨNG": {
+      "sym_dyspnea": 34,
+      "sym_dry_cough": 34,
+      "sym_fatigue": 34,
+      "sym_fever": 34,
+      "sym_chest_pain": 34,
+      "sym_nausea": 33,
+      "sym_abdominal_pain": 33,
+      "sym_sore_throat": 33,
+      "sym_wheeze": 33,
+      "sym_chills": 33
+    },
+    "TÊN_XÉT_NGHIỆM": {
+      "test_crp": 34,
+      "test_inr": 34,
+      "test_hba1c": 34,
+      "test_glucose": 29,
+      "test_potassium": 29,
+      "test_ast": 29,
+      "test_albumin": 29,
+      "test_hb": 29,
+      "test_ddimer": 29,
+      "test_wbc": 29
+    }
+  },
+  "source_composition": {
+    "existing_synthetic": 12,
+    "targeted_synthetic": 2105,
+    "targeted_negative": 200
+  },
+  "negative_control_records": 200,
+  "paired_lab_result_records": 507,
+  "lab_result_records_missing_test_name": 0,
+  "class_imbalance_ratio": 1.2242063492063493,
+  "duplicate_records": 0,
+  "invalid_offsets": 0,
+  "audit_queue_by_type": {
+    "CHẨN_ĐOÁN": 50,
+    "TRIỆU_CHỨNG": 50,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 50,
+    "TÊN_XÉT_NGHIỆM": 50,
+    "THUỐC": 50
+  }
+}

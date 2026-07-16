@@ -1,12 +1,17 @@
 from __future__ import annotations
 from typing import Any
-from .preprocess import preprocess_records, decode_feature_spans
+from .preprocess import preprocess_records, decode_feature_spans, normalize_predicted_span
 
 
-def merge_chunk_predictions(chunks: list[list[dict[str,Any]]]) -> list[dict[str,Any]]:
+def merge_chunk_predictions(chunks: list[list[dict[str,Any]]], text: str | None=None) -> list[dict[str,Any]]:
     best_by_boundary={}
     for spans in chunks:
-        for s in spans:
+        for span in spans:
+            s=dict(span)
+            if text is not None:
+                norm=normalize_predicted_span(text, s["start"], s["end"])
+                if not norm: continue
+                s.update(norm)
             boundary=(s["start"], s["end"])
             cur=best_by_boundary.get(boundary)
             if cur is None or s.get("score", 0.0) > cur.get("score", 0.0):
@@ -56,4 +61,4 @@ def predict_with_model(text: str, tokenizer, model, id2label: dict[int,str] | di
             s["text"]=text[s["start"]:s["end"]]
             if text[s["start"]:s["end"]] != s["text"]: raise ValueError("prediction offset invariant failed")
         chunk_spans.append(spans)
-    return merge_chunk_predictions(chunk_spans)
+    return merge_chunk_predictions(chunk_spans, text)

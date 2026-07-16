@@ -60,6 +60,18 @@ RESULT_CONTEXTS_BY_CONCEPT={
     "result_albumin":["albumin {m}, đánh giá dinh dưỡng.","Kết quả albumin là {m}."],
 }
 TEMPLATE_BY_TYPE={"TRIỆU_CHỨNG":SYMPTOM_CONTEXTS,"CHẨN_ĐOÁN":DIAGNOSIS_CONTEXTS,"THUỐC":DRUG_CONTEXTS,"TÊN_XÉT_NGHIỆM":TEST_CONTEXTS}
+NEGATIVE_CONTEXTS=[
+    "Bệnh nhân cao 1m70, nặng 70 kg. Giá thuốc thấp hơn tháng trước.",
+    "Chiều cao 170 cm; cân nặng 70 kg, không ghi nhận xét nghiệm mới.",
+    "Ông 65 tuổi đến khám lúc 08:30 ngày 12/05/2026.",
+    "Uống thuốc 500 mg sau ăn và siro 5 mL trước ngủ.",
+    "Giá thuốc giảm 15%, thấp hơn tháng trước!",
+    "Nhiệt độ 37.5 C, nhịp tim 80 lần/phút, huyết áp 120/80 mmHg.",
+    "Bệnh nhân nói kệ sách cao, bàn thấp; không phải kết quả xét nghiệm.",
+    "Lịch tái khám 14:00\nngày 01/08; phí giảm 10%.",
+    "Ghi chú: cao 1m68, cân nặng 62 kg; đơn thuốc 500 mg.",
+    "SpO2 98% và mạch 75 lần/phút trong theo dõi sinh hiệu."
+]
 
 
 def canonical_surface(text: str) -> str:
@@ -149,6 +161,18 @@ def generate_targeted_synthetic(cfg: BalanceConfig) -> list[dict[str,Any]]:
     return rows
 
 
+def generate_negative_controls(count: int=200, seed: int=57) -> list[dict[str,Any]]:
+    rows=[]
+    rng=random.Random(seed + 1000)
+    for i in range(count):
+        base=NEGATIVE_CONTEXTS[i % len(NEGATIVE_CONTEXTS)]
+        text=base + ("\r\nGhi chú sinh hiệu." if i % 11 == 0 else "") + (f" Mã lượt {i}." if i % 3 == 0 else f" Lần ghi nhận {i}.")
+        rec={"id":f"v2_2_negative_{i:04d}","text":text,"entities":[],"relations":[],"source":"targeted_negative_v2_2","source_split":"train","license":"project-generated","metadata":{"synthetic":True,"targeted_negative":True,"gold_evaluation":False,"phase":"5H"}}
+        validate_record(rec); rows.append(rec)
+    rng.shuffle(rows)
+    return rows
+
+
 def _read_jsonl(path: Path) -> list[dict[str,Any]]:
     if not path.exists() or path.stat().st_size == 0: return []
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -162,6 +186,7 @@ def _write_jsonl(path: Path, rows: list[dict[str,Any]]) -> None:
 
 def _source_bucket(rec: dict[str,Any]) -> str:
     if rec.get("metadata", {}).get("silver"): return "real_silver"
+    if rec.get("metadata", {}).get("targeted_negative"): return "targeted_negative"
     if rec.get("source") == "targeted_synthetic_v2": return "targeted_synthetic"
     if rec.get("metadata", {}).get("synthetic") or str(rec.get("source", "")).startswith("synthetic"): return "existing_synthetic"
     return "other_train_input"
@@ -172,9 +197,11 @@ def _concept_id(ent: dict[str,Any]) -> str:
 
 
 def balanced_report(rows: list[dict[str,Any]]) -> dict[str,Any]:
-    counts=Counter(); raw_forms=defaultdict(Counter); concepts=defaultdict(Counter); sources=Counter(); templates=defaultdict(set); paired_lab=0; missing_lab_name=0; dup=0; seen=set(); invalid=0
+    counts=Counter(); raw_forms=defaultdict(Counter); concepts=defaultdict(Counter); sources=Counter(); templates=defaultdict(set); paired_lab=0; missing_lab_name=0; negative_controls=0; dup=0; seen=set(); invalid=0
     for r in rows:
         sources[_source_bucket(r)]+=1
+        if r.get("metadata", {}).get("targeted_negative") and not r.get("entities"):
+            negative_controls += 1
         try: validate_record(r)
         except Exception: invalid+=1
         h=ann_hash(r)
@@ -189,7 +216,7 @@ def balanced_report(rows: list[dict[str,Any]]) -> dict[str,Any]:
                 typ=e["type"]; counts[typ]+=1; raw_forms[typ][unicodedata.normalize("NFC", e["text"]).casefold()] += 1; concepts[typ][_concept_id(e)] += 1; templates[typ].add(r.get("metadata", {}).get("context_template_id") or re.sub(r"\bLần khám \d+\.", "Lần khám {n}.", r["text"].replace(e["text"], "{m}")))
     top_share={t:(max(c.values())/sum(c.values()) if c else 0.0) for t,c in concepts.items()}
     vals=[counts[t] for t in TARGET_TYPES if counts[t]>0]
-    return {"entity_count_by_type":dict(counts),"raw_surface_forms":{t:len(raw_forms[t]) for t in TARGET_TYPES},"canonical_concepts":{t:len(concepts[t]) for t in TARGET_TYPES},"context_template_count":{t:len(templates[t]) for t in TARGET_TYPES},"top_canonical_share_by_type":top_share,"top_concepts_by_type":{t:dict(concepts[t].most_common(10)) for t in TARGET_TYPES},"source_composition":dict(sources),"paired_lab_result_records":paired_lab,"lab_result_records_missing_test_name":missing_lab_name,"class_imbalance_ratio":(max(vals)/min(vals) if vals else None),"duplicate_records":dup,"invalid_offsets":invalid}
+    return {"entity_count_by_type":dict(counts),"raw_surface_forms":{t:len(raw_forms[t]) for t in TARGET_TYPES},"canonical_concepts":{t:len(concepts[t]) for t in TARGET_TYPES},"context_template_count":{t:len(templates[t]) for t in TARGET_TYPES},"top_canonical_share_by_type":top_share,"top_concepts_by_type":{t:dict(concepts[t].most_common(10)) for t in TARGET_TYPES},"source_composition":dict(sources),"negative_control_records":negative_controls,"paired_lab_result_records":paired_lab,"lab_result_records_missing_test_name":missing_lab_name,"class_imbalance_ratio":(max(vals)/min(vals) if vals else None),"duplicate_records":dup,"invalid_offsets":invalid}
 
 
 def assert_balanced_gate(report: dict[str,Any], cfg: BalanceConfig) -> None:
@@ -200,6 +227,7 @@ def assert_balanced_gate(report: dict[str,Any], cfg: BalanceConfig) -> None:
         if report["canonical_concepts"].get(typ,0) < min_concepts: errors.append(f"{typ} canonical-concept minimum not met")
         if report["top_canonical_share_by_type"].get(typ,1.0) > cfg.max_top_canonical_share: errors.append(f"{typ} top canonical share too high")
     if report.get("class_imbalance_ratio") and report["class_imbalance_ratio"] > cfg.max_class_imbalance_ratio: errors.append("class imbalance too high")
+    if report.get("negative_control_records", 0) < 200: errors.append("negative control minimum not met")
     if report.get("duplicate_records") or report.get("invalid_offsets"): errors.append("duplicate or invalid offsets found")
     if errors: raise ValueError("; ".join(errors))
 
@@ -211,6 +239,10 @@ def build_balanced_corpus(train_silver: Path, train_synthetic: Path, output_path
         r=apply_source_target_constraints(r)
         if r is None: continue
         r.setdefault("metadata",{})["phase5f_train_only"] = True
+        h=ann_hash(r)
+        if h not in seen:
+            validate_record(r); seen.add(h); rows.append(r)
+    for r in generate_negative_controls(200, cfg.seed):
         h=ann_hash(r)
         if h not in seen:
             validate_record(r); seen.add(h); rows.append(r)

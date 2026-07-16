@@ -95,6 +95,32 @@ def preprocess_records(records: list[dict[str,Any]], tokenizer, max_length:int, 
     return features, stats
 
 
+_TRIM_LEFT=set(" \t\r\n,;:!?\"'([{“”‘’«»")
+_TRIM_RIGHT=set(" \t\r\n,;:!?\"')]}“”‘’«»")
+
+def normalize_predicted_span(text: str, start: int, end: int) -> dict[str,Any] | None:
+    if not (0 <= start < end <= len(text)):
+        return None
+    while start < end and text[start] in _TRIM_LEFT:
+        start += 1
+    while start < end:
+        ch=text[end-1]
+        if ch == ".":
+            prev=text[end-2] if end-2 >= start else ""
+            nxt=text[end] if end < len(text) else ""
+            if prev.isdigit() and nxt.isdigit():
+                break
+            end -= 1; continue
+        if ch in _TRIM_RIGHT:
+            end -= 1; continue
+        break
+    if not (0 <= start < end <= len(text)):
+        return None
+    span_text=text[start:end]
+    if not span_text:
+        return None
+    return {"start":start,"end":end,"text":span_text}
+
 def decode_feature_spans(feature: dict[str,Any], label_ids: list[int], id2label: dict[int,str] | dict[str,str] | None=None) -> list[dict[str,Any]]:
     mapping=id2label or ID2LABEL
     labs=[]
@@ -104,8 +130,8 @@ def decode_feature_spans(feature: dict[str,Any], label_ids: list[int], id2label:
     spans=labels_to_spans(feature["offset_mapping"], labs, len(feature["text"]))
     out=[]
     for s in spans:
-        if not (0 <= s["start"] < s["end"] <= len(feature["text"])): continue
-        s["text"]=feature["text"][s["start"]:s["end"]]
-        if not s["text"]: continue
+        norm=normalize_predicted_span(feature["text"], s["start"], s["end"])
+        if not norm: continue
+        s.update(norm)
         out.append(s)
     return out

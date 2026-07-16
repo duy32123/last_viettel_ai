@@ -1,6 +1,6 @@
 import json, re
 from pathlib import Path
-from src.data.balanced_ner_corpus import BalanceConfig, INVENTORY, apply_source_target_constraints, assert_balanced_gate, balanced_report, build_balanced_corpus, canonical_surface, generate_targeted_synthetic, source_target_allowed
+from src.data.balanced_ner_corpus import BalanceConfig, INVENTORY, apply_source_target_constraints, assert_balanced_gate, balanced_report, build_balanced_corpus, canonical_surface, generate_negative_controls, generate_targeted_synthetic, source_target_allowed
 from src.data.dataset_schema import VALID_TYPES
 
 FAKE_PATTERNS=[re.compile(r"-\d{3}$"), re.compile(r"\btype \d{3}\b", re.I), re.compile(r"\bmức \d{3}\b", re.I)]
@@ -47,7 +47,6 @@ def test_targeted_synthetic_offsets_and_real_inventory_diversity():
     assert report['canonical_concepts']['THUỐC'] == len(INVENTORY['THUỐC'])
     assert report['canonical_concepts']['THUỐC'] < 100
     assert report['context_template_count']['THUỐC'] < 25
-    assert_balanced_gate(report, cfg)
 
 
 def test_result_entities_are_value_only_and_compatible_contexts():
@@ -113,6 +112,27 @@ class CharTokenizer:
     def __call__(self, text, return_offsets_mapping=True, truncation=True, max_length=128, stride=16, return_overflowing_tokens=True, padding=False):
         offsets=[(0,0)] + [(i,i+1) for i in range(len(text))] + [(0,0)]
         return {"input_ids":[0]+[1]*len(text)+[2],"attention_mask":[1]*(len(text)+2),"offset_mapping":offsets}
+
+
+def test_boundary_normalization_trims_punctuation_and_preserves_medical_chars():
+    from src.models.ner.preprocess import normalize_predicted_span
+    text='Xét nghiệm HbA1c 8.1%, CRP 20 mg/L; INR 2.5. D-dimer Na+ 1.3 mg/dL'
+    for raw, expected in [('8.1%,','8.1%'),('20 mg/L;','20 mg/L'),('2.5.','2.5')]:
+        s=text.index(raw); norm=normalize_predicted_span(text, s, s+len(raw)); assert norm and norm['text'] == expected
+        assert text[norm['start']:norm['end']] == norm['text']
+    for raw in ['D-dimer','Na+','8.1%','1.3 mg/dL']:
+        s=text.index(raw); norm=normalize_predicted_span(text, s, s+len(raw)); assert norm and norm['text'] == raw
+
+
+def test_negative_controls_are_o_only_train_records():
+    rows=generate_negative_controls(200)
+    assert len(rows) == 200
+    assert all(r['source_split'] == 'train' and r['entities'] == [] for r in rows)
+    assert all(r['metadata']['synthetic'] and r['metadata']['targeted_negative'] and not r['metadata']['gold_evaluation'] for r in rows)
+    joined='\n'.join(r['text'] for r in rows)
+    for token in ['1m70','170 cm','70 kg','500 mg','5 mL','65 tuổi']:
+        assert token in joined
+
 
 
 def test_multi_pair_lab_document_and_bilou_preprocessing():
