@@ -1,0 +1,99 @@
+{
+  "entity_count_by_type": {
+    "CHẨN_ĐOÁN": 504,
+    "TRIỆU_CHỨNG": 515,
+    "TÊN_XÉT_NGHIỆM": 502,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 502,
+    "THUỐC": 505
+  },
+  "unique_forms_by_type": {
+    "CHẨN_ĐOÁN": 502,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 501,
+    "THUỐC": 502,
+    "TRIỆU_CHỨNG": 504,
+    "TÊN_XÉT_NGHIỆM": 501
+  },
+  "top_mention_share_by_type": {
+    "CHẨN_ĐOÁN": 0.003968253968253968,
+    "TRIỆU_CHỨNG": 0.015533980582524271,
+    "TÊN_XÉT_NGHIỆM": 0.00398406374501992,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 0.00398406374501992,
+    "THUỐC": 0.005940594059405941
+  },
+  "top_mentions_by_type": {
+    "CHẨN_ĐOÁN": {
+      "tăng huyết áp": 2,
+      "đái tháo đường": 2,
+      "đái tháo đường type 361": 1,
+      "suy tim type 445": 1,
+      "đái tháo đường type 461": 1,
+      "cường giáp type 233": 1,
+      "viêm phổi type 183": 1,
+      "loãng xương type 339": 1,
+      "trầm-cảm-type-238": 1,
+      "tăng huyết áp type 180": 1
+    },
+    "KẾT_QUẢ_XÉT_NGHIỆM": {
+      "7,2 mmol/l": 2,
+      "207.6 mmol/l": 1,
+      "406.5 mmol/l": 1,
+      "287.6 mmol/l": 1,
+      "356.5 mmol/l": 1,
+      "393.2 mmol/l": 1,
+      "120.9 mmol/l": 1,
+      "387.6 mmol/l": 1,
+      "281.0 mmol/l": 1,
+      "360.9 mmol/l": 1
+    },
+    "THUỐC": {
+      "amlodipine": 3,
+      "amlodipine 5mg uống sáng": 2,
+      "dapagliflozin-299": 1,
+      "lisinopril-445": 1,
+      "zoloft-068": 1,
+      "amoxicillin-310": 1,
+      "amoxicillin-435": 1,
+      "budesonide-263": 1,
+      "ibuprofen-457": 1,
+      "spironolactone-290": 1
+    },
+    "TRIỆU_CHỨNG": {
+      "ho khan": 8,
+      "met": 3,
+      "sốt": 2,
+      "đau ngực": 2,
+      "ngứa mức 438": 1,
+      "sốt mức 240": 1,
+      "đau ngực mức 403": 1,
+      "sụt cân mức 412": 1,
+      "ho khan mức 201": 1,
+      "sụt cân mức 212": 1
+    },
+    "TÊN_XÉT_NGHIỆM": {
+      "glucose": 2,
+      "procalcitonin-278": 1,
+      "triglyceride-033": 1,
+      "ure-209": 1,
+      "d-dimer-399": 1,
+      "alt-266": 1,
+      "wbc-224": 1,
+      "triglyceride-493": 1,
+      "triglyceride-393": 1,
+      "hdl-c-052": 1
+    }
+  },
+  "source_composition": {
+    "synthetic_v1": 12,
+    "targeted_synthetic_v2": 2500
+  },
+  "class_imbalance_ratio": 1.0258964143426295,
+  "duplicate_records": 0,
+  "invalid_offsets": 0,
+  "audit_queue_by_type": {
+    "CHẨN_ĐOÁN": 50,
+    "TRIỆU_CHỨNG": 50,
+    "THUỐC": 50,
+    "TÊN_XÉT_NGHIỆM": 50,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 50
+  }
+}
