@@ -11,3 +11,11 @@ model_weights/
 *.pth
 *.bin
 *.safetensors
+input/
+data/annotation/*.todo.jsonl
+data/processed/train.external.jsonl
+data/processed/train.real.jsonl
+data/processed/dev.provisional.jsonl
+artifacts/*.json
+pytorch_model.bin
+ner_pilot_train.log

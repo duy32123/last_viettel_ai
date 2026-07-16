@@ -23,7 +23,8 @@
         "TEST_RESULT": "KẾT_QUẢ_XÉT_NGHIỆM",
         "SYMPTOM_AND_DISEASE": "UNMAPPED",
         "MEDICAL_PROCEDURE": "UNMAPPED"
-      }
+      },
+      "schema": "token_bio"
     },
     {
       "name": "ViMQ",
