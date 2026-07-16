@@ -21,11 +21,11 @@
     "TÊN_XÉT_NGHIỆM": 16
   },
   "context_template_count": {
-    "CHẨN_ĐOÁN": 10,
-    "KẾT_QUẢ_XÉT_NGHIỆM": 6,
-    "THUỐC": 9,
-    "TRIỆU_CHỨNG": 21,
-    "TÊN_XÉT_NGHIỆM": 6
+    "CHẨN_ĐOÁN": 24,
+    "KẾT_QUẢ_XÉT_NGHIỆM": 32,
+    "THUỐC": 25,
+    "TRIỆU_CHỨNG": 30,
+    "TÊN_XÉT_NGHIỆM": 62
   },
   "top_canonical_share_by_type": {
     "CHẨN_ĐOÁN": 0.0496031746031746,

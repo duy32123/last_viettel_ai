@@ -46,8 +46,37 @@ def test_targeted_synthetic_offsets_and_real_inventory_diversity():
     assert report['entity_count_by_type']['THUỐC'] == 500
     assert report['canonical_concepts']['THUỐC'] == len(INVENTORY['THUỐC'])
     assert report['canonical_concepts']['THUỐC'] < 100
-    assert report['context_template_count']['THUỐC'] < 20
+    assert report['context_template_count']['THUỐC'] < 25
     assert_balanced_gate(report, cfg)
+
+
+def test_result_entities_are_value_only_and_compatible_contexts():
+    rows=generate_targeted_synthetic(BalanceConfig(min_entities_per_type=80))
+    test_names=['INR','HbA1c','HBA1C','CRP','glucose','WBC','creatinine','AST','ALT','hemoglobin','Hb']
+    result_rows=[r for r in rows if r['entities'][0]['type'] == 'KẾT_QUẢ_XÉT_NGHIỆM']
+    assert result_rows
+    for r in result_rows:
+        e=r['entities'][0]; cid=e['metadata']['concept_id']
+        assert r['text'][e['start']:e['end']] == e['text']
+        assert not any(name == e['text'] or e['text'].startswith(name + ' ') for name in test_names)
+        before=r['text'][:e['start']]; after=r['text'][e['end']:]
+        assert any(name in before or name in after for name in test_names + ['cúm A','SARS-CoV-2'])
+        assert 'INR INR' not in r['text']
+        assert 'HbA1c INR' not in r['text']
+        if cid == 'result_inr': assert 'INR' in before
+        if cid == 'result_hba1c_pct': assert 'HbA1c' in before
+        if cid == 'result_crp_mgl': assert 'CRP' in before
+        if cid == 'result_glucose_mmol': assert 'glucose' in before or 'glucose' in after
+        if cid == 'result_wbc_gl': assert 'WBC' in before
+
+
+def test_diagnosis_uses_diagnosis_context_not_symptom_template():
+    rows=generate_targeted_synthetic(BalanceConfig(min_entities_per_type=60))
+    diagnosis_rows=[r for r in rows if r['entities'][0]['type'] == 'CHẨN_ĐOÁN']
+    assert diagnosis_rows
+    assert all(not r['text'].startswith('Triệu chứng:') for r in diagnosis_rows)
+    assert any(r['text'].startswith('Chẩn đoán hiện tại:') or r['text'].startswith('Tiền sử bệnh:') for r in diagnosis_rows)
+
 
 
 def test_build_balanced_corpus_train_only_and_gold_dev_independent(tmp_path):

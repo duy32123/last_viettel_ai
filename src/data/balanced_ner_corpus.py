@@ -31,13 +31,30 @@ SYMPTOM_INV=[("sym_fever",["sốt","sot","sốt cao"]),("sym_dry_cough",["ho kha
 DIAG_INV=[("dx_htn",["tăng huyết áp","THA"]),("dx_diabetes",["đái tháo đường","tiểu đường"]),("dx_obesity",["béo phì"]),("dx_pneumonia",["viêm phổi"]),("dx_asthma",["hen phế quản","hen"]),("dx_hf",["suy tim"]),("dx_ckd",["bệnh thận mạn","BTM"]),("dx_hepb",["viêm gan B"]),("dx_dyslipidemia",["rối loạn lipid máu"]),("dx_gout",["gout"]),("dx_tb",["lao phổi"]),("dx_gastritis",["viêm dạ dày"]),("dx_anemia",["thiếu máu"]),("dx_hyperthyroid",["cường giáp"]),("dx_hypothyroid",["suy giáp"]),("dx_copd",["COPD"]),("dx_stone",["sỏi thận"]),("dx_sinusitis",["viêm xoang"]),("dx_depression",["trầm cảm"]),("dx_osteoporosis",["loãng xương"])]
 DRUG_INV=[("drug_insulin",["insulin"]),("drug_metformin",["metformin"]),("drug_amlodipine",["amlodipine"]),("drug_losartan",["losartan"]),("drug_atorvastatin",["atorvastatin"]),("drug_aspirin",["aspirin"]),("drug_paracetamol",["paracetamol","acetaminophen"]),("drug_ibuprofen",["ibuprofen"]),("drug_omeprazole",["omeprazole"]),("drug_cefuroxime",["cefuroxime"]),("drug_amoxicillin",["amoxicillin"]),("drug_azithro",["azithromycin"]),("drug_salbutamol",["salbutamol"]),("drug_budesonide",["budesonide"]),("drug_furosemide",["furosemide"]),("drug_spironolactone",["spironolactone"]),("drug_warfarin",["warfarin"]),("drug_clopidogrel",["clopidogrel"]),("drug_zoloft",["Zoloft","sertraline"]),("drug_prozac",["Prozac","fluoxetine"])]
 TEST_INV=[("test_hba1c",["HbA1c","HBA1C"]),("test_crp",["CRP"]),("test_inr",["INR"]),("test_glucose",["glucose","đường huyết"]),("test_wbc",["WBC","bạch cầu"]),("test_ast",["AST"]),("test_alt",["ALT"]),("test_creatinine",["creatinine"]),("test_hb",["hemoglobin","Hb"]),("test_ure",["ure"]),("test_troponin",["troponin"]),("test_ldl",["LDL-C"]),("test_hdl",["HDL-C"]),("test_tg",["triglyceride"]),("test_bilirubin",["bilirubin"])]
-RESULT_INV=[("result_hba1c_pct",["7.2%","8.1%","5.8%"]),("result_crp_mgl",["20 mg/L","35 mg/L"]),("result_inr",["INR 2.5","INR 3.1"]),("result_glucose_mmol",["7.2 mmol/L","8.1 mmol/L"]),("result_wbc_gl",["12 G/L","15 G/L"]),("result_positive",["dương tính"]),("result_negative",["âm tính"]),("result_high",["cao"]),("result_low",["thấp"]),("result_increased",["tăng"]),("result_decreased",["giảm"]),("result_creatinine",["1.1 mg/dL","1.4 mg/dL"]),("result_ast",["80 U/L"]),("result_alt",["95 U/L"]),("result_hb",["10 g/dL"])]
+RESULT_INV=[("result_hba1c_pct",["7.2%","8.1%","5.8%"]),("result_crp_mgl",["20 mg/L","35 mg/L"]),("result_inr",["2.5","3.1"]),("result_glucose_mmol",["7.2 mmol/L","8.1 mmol/L"]),("result_wbc_gl",["12 G/L","15 G/L"]),("result_positive",["dương tính"]),("result_negative",["âm tính"]),("result_high",["cao"]),("result_low",["thấp"]),("result_increased",["tăng"]),("result_decreased",["giảm"]),("result_creatinine",["1.1 mg/dL","1.4 mg/dL"]),("result_ast",["80 U/L"]),("result_alt",["95 U/L"]),("result_hb",["10 g/dL"])]
 INVENTORY={"TRIỆU_CHỨNG":SYMPTOM_INV,"CHẨN_ĐOÁN":DIAG_INV,"THUỐC":DRUG_INV,"TÊN_XÉT_NGHIỆM":TEST_INV,"KẾT_QUẢ_XÉT_NGHIỆM":RESULT_INV}
-CONTEXTS=["Bệnh nhân ghi nhận {m}.","BN có {m}; cần theo dõi.","Không ghi nhận {m} trước đó.","Tiền sử gia đình có {m}.","Khám hôm nay: {m}!", "Triệu chứng: {m}\r\nĐề nghị tái khám."]
+SYMPTOM_CONTEXTS=["Bệnh nhân than {m}.","BN có biểu hiện {m}; cần theo dõi.","Không ghi nhận {m} trong lần khám này.","Khám hôm nay ghi nhận {m}!", "Triệu chứng: {m}\r\nĐề nghị tái khám."]
+DIAGNOSIS_CONTEXTS=["Chẩn đoán hiện tại: {m}.","Tiền sử bệnh: {m}.","Bệnh nền gồm {m}; theo dõi định kỳ.","Hồ sơ ghi nhận {m} đã điều trị.","Kết luận sau khám: {m}."]
 DRUG_CONTEXTS=["Đang dùng {m} 5 mg đường uống.","Kê {m} liều thấp sau ăn.","BN tự mua {m}, uống mỗi ngày.","Thuốc hiện tại: {m}; theo dõi tác dụng phụ."]
 TEST_CONTEXTS=["Xét nghiệm {m} được chỉ định.","Theo dõi {m} buổi sáng.","Kết quả {m}: đang chờ.","XN {m}\r\nLặp lại sau 1 tuần."]
-RESULT_CONTEXTS=["HbA1c {m}, tư vấn kiểm soát đường huyết.","CRP {m}; cân nhắc nhiễm trùng.","INR {m}, chỉnh liều nếu cần.","glucose {m}; đo lại khi đói.","WBC {m}, theo dõi công thức máu."]
-TEMPLATE_BY_TYPE={"TRIỆU_CHỨNG":CONTEXTS,"CHẨN_ĐOÁN":CONTEXTS,"THUỐC":DRUG_CONTEXTS,"TÊN_XÉT_NGHIỆM":TEST_CONTEXTS,"KẾT_QUẢ_XÉT_NGHIỆM":RESULT_CONTEXTS}
+RESULT_CONTEXTS_BY_CONCEPT={
+    "result_hba1c_pct":["HbA1c {m}, tư vấn kiểm soát đường huyết.","Kết quả HbA1c là {m} sau 3 tháng."],
+    "result_crp_mgl":["CRP {m}; cân nhắc nhiễm trùng.","Xét nghiệm CRP cho thấy {m}."],
+    "result_inr":["INR {m}, chỉnh liều nếu cần.","Kết quả INR là {m}."],
+    "result_glucose_mmol":["glucose {m}; đo lại khi đói.","Đường huyết glucose ghi nhận {m}."],
+    "result_wbc_gl":["WBC {m}, theo dõi công thức máu.","Bạch cầu WBC ở mức {m}."],
+    "result_positive":["Test nhanh cúm A {m}.","Kháng nguyên SARS-CoV-2 {m}."],
+    "result_negative":["Test nhanh cúm A {m}.","Kháng nguyên SARS-CoV-2 {m}."],
+    "result_high":["CRP {m} so với ngưỡng tham chiếu.","glucose {m} sau ăn."],
+    "result_low":["hemoglobin {m} so với ngưỡng tham chiếu.","glucose {m} lúc đói."],
+    "result_increased":["AST {m} so với lần trước.","ALT {m} sau điều trị."],
+    "result_decreased":["CRP {m} sau kháng sinh.","glucose {m} sau điều chỉnh thuốc."],
+    "result_creatinine":["creatinine {m}, đánh giá chức năng thận.","Kết quả creatinine là {m}."],
+    "result_ast":["AST {m}, theo dõi men gan.","Men gan AST ghi nhận {m}."],
+    "result_alt":["ALT {m}, theo dõi men gan.","Men gan ALT ghi nhận {m}."],
+    "result_hb":["Hb {m}, đánh giá thiếu máu.","hemoglobin {m} trong công thức máu."],
+}
+TEMPLATE_BY_TYPE={"TRIỆU_CHỨNG":SYMPTOM_CONTEXTS,"CHẨN_ĐOÁN":DIAGNOSIS_CONTEXTS,"THUỐC":DRUG_CONTEXTS,"TÊN_XÉT_NGHIỆM":TEST_CONTEXTS}
 
 
 def canonical_surface(text: str) -> str:
@@ -73,13 +90,13 @@ def apply_source_target_constraints(rec: dict[str,Any]) -> dict[str,Any] | None:
 def generate_targeted_synthetic(cfg: BalanceConfig) -> list[dict[str,Any]]:
     rng=random.Random(cfg.seed); rows=[]
     for typ, concepts in INVENTORY.items():
-        contexts=TEMPLATE_BY_TYPE[typ]
         for i in range(cfg.min_entities_per_type):
             concept_id, surfaces=concepts[i % len(concepts)]
             mention=surfaces[(i // len(concepts)) % len(surfaces)]
+            contexts=RESULT_CONTEXTS_BY_CONCEPT[concept_id] if typ == "KẾT_QUẢ_XÉT_NGHIỆM" else TEMPLATE_BY_TYPE[typ]
             template_idx=(i + len(concept_id)) % len(contexts)
             text=contexts[template_idx].format(m=mention) + f" Lần khám {i}."
-            rows.append(_record(f"v2_{typ}_{i:04d}", text, mention, typ, concept_id, context_template_id=f"{typ}:{template_idx}"))
+            rows.append(_record(f"v2_{typ}_{i:04d}", text, mention, typ, concept_id, context_template_id=f"{typ}:{concept_id}:{template_idx}"))
     rng.shuffle(rows)
     return rows
 
