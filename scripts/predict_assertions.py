@@ -7,7 +7,7 @@ if __name__ == "__main__":
     p=argparse.ArgumentParser(); p.add_argument("input"); p.add_argument("--output", required=True); p.add_argument("--model"); p.add_argument("--thresholds"); p.add_argument("--batch-size", type=int, default=16)
     ns=p.parse_args(); rows=[json.loads(l) for l in Path(ns.input).read_text(encoding="utf-8").splitlines() if l.strip()]
     threshold_path=ns.thresholds or (str(Path(ns.model)/"thresholds.json") if ns.model else None)
-    thresholds=load_thresholds(threshold_path)
+    thresholds=load_thresholds(threshold_path) if ns.model or ns.thresholds else None
     model=tokenizer=None
     if ns.model:
         try:

@@ -1,7 +1,8 @@
 import json
+import warnings
 import pytest
 from src.data.assertion_generator import AssertionGenConfig, build_assertion_corpus, canonical_hash
-from src.models.assertion.inference import predict_assertions, merge_rule_model, serialize_assertions
+from src.models.assertion.inference import predict_assertions, merge_rule_model, serialize_assertions, load_thresholds
 from src.models.assertion.labels import ASSERTION_LABELS, to_vector, from_scores
 from src.models.assertion.metrics import multilabel_metrics, tune_thresholds
 from src.models.assertion.preprocess import make_examples, register_special_tokens, SPECIAL_TOKENS, tokenize_examples, FloatMultilabelCollator, assert_float_multilabel_batch
@@ -43,7 +44,7 @@ def test_crlf_section_transition_no_diacritic_and_provenance():
     assert labels_for(text,'Hen phế quản') == ['isHistorical']
     assert labels_for(text,'Khó thở','TRIỆU_CHỨNG') == []
     res=rule_assertions('Khong ghi nhan sot.', ent('Khong ghi nhan sot.', 'sot', 'TRIỆU_CHỨNG'))
-    assert res['labels'] == []
+    assert res['labels'] == ['isNegated']
     res=rule_assertions('Không ghi nhận sốt.', ent('Không ghi nhận sốt.', 'sốt', 'TRIỆU_CHỨNG'))
     assert res['rule_hits'][0]['rule_id'] == 'neg_scope'
     assert res['rule_hits'][0]['cue_span'] == [0,14]
@@ -89,12 +90,53 @@ def test_tokenizer_crop_keeps_markers_long_unicode_crlf_edges():
             assert tok.convert_tokens_to_ids("<ENT_END>") in ids
 
 def test_hybrid_thresholds_metrics_and_merge():
-    assert merge_rule_model(['isNegated'], [0.1,0.9,0.9], {'isNegated':0.5,'isFamily':0.5,'isHistorical':0.5}) == ['isNegated','isFamily','isHistorical']
+    text='Tiền sử gia đình có tăng huyết áp.'; e=ent(text,'tăng huyết áp')
+    assert merge_rule_model(['isNegated'], [0.1,0.9,0.9], {'isNegated':0.5,'isFamily':0.5,'isHistorical':0.5}, text=text, entity=e) == ['isNegated','isFamily','isHistorical']
     m=multilabel_metrics([['isNegated'], [], ['isFamily','isHistorical']], [['isNegated'], [], ['isFamily']])
     assert m['micro_precision'] == 1.0 and m['per_label']['isHistorical']['false_negative'] == 1
     th=tune_thresholds([[1,0,0],[0,1,0],[0,0,1],[0,0,0]], [[.9,.1,.1],[.2,.8,.1],[.1,.2,.85],[.1,.1,.1]])
     assert set(th) == set(ASSERTION_LABELS) and all('threshold' in v and 'f1' in v for v in th.values())
     with pytest.raises(ValueError): tune_thresholds([[1,0,0],[1,1,0]], [[.9,.1,.1],[.8,.8,.1]])
+
+def test_threshold_loading_flat_nested_and_rule_only_no_warning(tmp_path):
+    flat=tmp_path/"flat.json"; flat.write_text(json.dumps({"isFamily":0.95}), encoding="utf-8")
+    nested=tmp_path/"nested.json"; nested.write_text(json.dumps({"isFamily":{"threshold":0.9,"f1":1.0}}), encoding="utf-8")
+    assert load_thresholds(flat)["isFamily"] == 0.95
+    assert load_thresholds(nested)["isFamily"] == 0.9
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        out=predict_assertions("Không ghi nhận đau ngực.", [ent("Không ghi nhận đau ngực.","đau ngực","TRIỆU_CHỨNG")])
+    assert not record and out[0]["assertions"] == ["isNegated"]
+
+def test_evidence_gated_hybrid_blocks_family_false_positives():
+    thresholds={l:0.95 for l in ASSERTION_LABELS}
+    fp1="Tiền sử bệnh nhân có đái tháo đường."
+    out=predict_assertions(fp1, [ent(fp1,"đái tháo đường")], thresholds=thresholds, model_scores_override=[[0.0,0.99,0.99]])
+    assert out[0]["assertions"] == ["isHistorical"]
+    fp2="Hiện tại bệnh nhân có khó thở."
+    out=predict_assertions(fp2, [ent(fp2,"khó thở","TRIỆU_CHỨNG")], thresholds=thresholds, model_scores_override=[[0.0,0.99,0.99]])
+    assert out[0]["assertions"] == []
+    ok="Gia đình ghi nhận khó thở."
+    out=predict_assertions(ok, [ent(ok,"khó thở","TRIỆU_CHỨNG")], thresholds=thresholds, model_scores_override=[[0.0,0.99,0.0]])
+    assert out[0]["assertions"] == ["isFamily"]
+
+def test_phase6d_held_out_hard_suite_with_overconfident_model():
+    cases=[
+        ("Không ghi nhận đau ngực.","đau ngực","TRIỆU_CHỨNG",["isNegated"]),
+        ("Không sốt nhưng còn ho.","ho","TRIỆU_CHỨNG",[]),
+        ("Tiền sử bệnh nhân có đái tháo đường.","đái tháo đường","CHẨN_ĐOÁN",["isHistorical"]),
+        ("Hiện tại bệnh nhân có khó thở.","khó thở","TRIỆU_CHỨNG",[]),
+        ("Mẹ bệnh nhân có hen phế quản.","hen phế quản","CHẨN_ĐOÁN",["isFamily"]),
+        ("Tiền sử gia đình có tăng huyết áp.","tăng huyết áp","CHẨN_ĐOÁN",["isFamily","isHistorical"]),
+        ("TIỀN SỬ\r\nHen phế quản.\r\nHIỆN TẠI\r\nKhó thở.","Khó thở","TRIỆU_CHỨNG",[]),
+        ("Ho so cu ghi viem phoi.","viem phoi","CHẨN_ĐOÁN",["isHistorical"]),
+        ("Khong ghi nhan sot.","sot","TRIỆU_CHỨNG",["isNegated"]),
+        ("Không những sốt mà còn ho.","sốt","TRIỆU_CHỨNG",[]),
+    ]
+    thresholds={l:0.95 for l in ASSERTION_LABELS}
+    for text,mention,typ,expected in cases:
+        out=predict_assertions(text,[ent(text,mention,typ)],thresholds=thresholds,model_scores_override=[[0.99,0.99,0.99]])
+        assert out[0]["assertions"] == expected
 
 def test_collator_rejects_long_labels_and_accepts_float32():
     torch=pytest.importorskip("torch")

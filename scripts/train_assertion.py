@@ -3,6 +3,8 @@ import argparse, json, subprocess, sys, inspect
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.models.assertion.labels import ASSERTION_LABELS, LABEL2ID, ID2LABEL
 from src.models.assertion.metrics import multilabel_metrics, tune_thresholds, labels_from_scores
+from src.models.assertion.inference import merge_rule_model
+from src.models.assertion.rules import rule_assertions
 from src.models.assertion.preprocess import make_examples, register_special_tokens, tokenize_examples, FloatMultilabelCollator
 
 def load_jsonl(path):
@@ -38,6 +40,18 @@ def compute_metrics_from_logits(eval_pred):
     for lab,vals in m["per_label"].items(): flat[f"{lab}_f1"]=vals["f1"]
     return flat
 
+def calibration_report(examples, probs, thresholds):
+    gold=[[lab for lab,v in zip(ASSERTION_LABELS,ex["labels"]) if v] for ex in examples]
+    model_only=labels_from_scores(probs, {l:float(thresholds[l]["threshold"]) for l in ASSERTION_LABELS})
+    rule_only=[rule_assertions(ex["text"], ex["entity"])["labels"] for ex in examples]
+    hybrid=[merge_rule_model(r, p, {l:float(thresholds[l]["threshold"]) for l in ASSERTION_LABELS}, text=ex["text"], entity=ex["entity"]) for r,p,ex in zip(rule_only, probs, examples)]
+    return {
+        "thresholds":thresholds,
+        "model_only":multilabel_metrics(gold, model_only),
+        "rule_only":multilabel_metrics(gold, rule_only),
+        "hybrid":multilabel_metrics(gold, hybrid),
+    }
+
 if __name__ == "__main__":
     p=argparse.ArgumentParser(); p.add_argument("--config", default="configs/train_assertion.xlmr_base.yaml"); p.add_argument("--dry-run-smoke", action="store_true"); p.add_argument("--resume-from-checkpoint")
     ns=p.parse_args(); cfg=json.loads(Path(ns.config).read_text(encoding="utf-8"))
@@ -71,6 +85,7 @@ if __name__ == "__main__":
     th={l:v["threshold"] for l,v in thresholds.items()}
     dev_pred=labels_from_scores(dev_probs, th); dev_labels=[[lab for lab,v in zip(ASSERTION_LABELS,row) if v] for row in dev_gold]
     dev_metrics=multilabel_metrics(dev_labels, dev_pred); (out/"dev_metrics.json").write_text(json.dumps(dev_metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out/"calibration_report.json").write_text(json.dumps(calibration_report(dev, dev_probs, thresholds), ensure_ascii=False, indent=2), encoding="utf-8")
     if test:
         test_ds=Dataset.from_list(test).map(encode, batched=True, remove_columns=list(test[0].keys()))
         test_probs=(1/(1+np.exp(-trainer.predict(test_ds).predictions))).tolist(); test_gold=[ex["labels"] for ex in test]

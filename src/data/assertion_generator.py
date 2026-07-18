@@ -85,6 +85,20 @@ def _text_for(combo, mention, i, split):
 def _make(split, idx, combo):
     typ,m=_choose_entity(idx); text,slice_name=_text_for(combo,m,idx,split)
     fam=SPLIT_FAMILIES[split][idx % len(SPLIT_FAMILIES[split])]
+    if split == "train" and combo == [] and idx % 11 == 0:
+        repairs=[
+            f"{_context(idx)}: Tiền sử bệnh nhân có {m}.",
+            f"{_context(idx)}: Bệnh nhân hiện có {m}.",
+            f"{_context(idx)}: Người bệnh đang điều trị {m}.",
+            f"{_context(idx)}: Hồ sơ bệnh nhân ghi {m}.",
+            f"{_context(idx)}: Tiền sử cũ ghi {m}. Hiện tại bệnh nhân ổn định.",
+            f"{_context(idx)}: Không những {m} mà còn cần theo dõi dấu hiệu khác.",
+            f"{_context(idx)}: Khong nhung {m} ma con can theo doi them.",
+            f"{_context(idx)}: Than nhan trao doi, benh nhan hien khong co {m}.",
+        ]
+        text=repairs[(idx//11) % len(repairs)]
+        slice_name="precision_guard_negative"
+        fam="precision_guard_negative"
     ent=_entity(text,m,typ,combo)
     # deterministic multi-entity scope examples
     if idx % 17 == 0:
