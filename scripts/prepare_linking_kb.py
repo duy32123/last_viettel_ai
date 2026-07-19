@@ -3,7 +3,7 @@ import argparse, json, sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.data.import_icd import import_icd_official
 from src.data.import_rxnorm import import_rxnorm_rrf, import_rxnorm_csv
-from src.data.import_hf_icd_aux import rows_from_hf, import_auxiliary_rows, make_pilot_examples
+from src.data.import_hf_icd_aux import rows_from_hf, import_auxiliary_rows, make_pilot_examples, assert_no_query_kb_leakage, evaluate_pilot_bm25
 from src.data.kb_schema import dedupe_records, write_jsonl, file_sha256
 from src.linking.pipeline import validate_kb
 
@@ -18,7 +18,9 @@ def main():
    if not bool(src.get('enabled', False)):
     manifests.append({**src,'status':'skipped_disabled'}); continue
    rows=list(rows_from_hf(src.get('split'))); recs, aux_report=import_auxiliary_rows(rows, src.get('version','hf-pilot'), src.get('dataset','birgermoell/icd10-clinical-notes'))
-   (out/'auxiliary_pilot_examples.json').write_text(json.dumps(make_pilot_examples(rows,[r.code for r in recs]), ensure_ascii=False, indent=2), encoding='utf-8')
+   names={r.code:r.canonical_name for r in recs}; pilot=make_pilot_examples(rows,[r.code for r in recs], names); leakage=assert_no_query_kb_leakage(recs, pilot); pilot_metrics=evaluate_pilot_bm25(recs, pilot, int(src.get('top_k', 10)))
+   (out/'auxiliary_pilot_examples.json').write_text(json.dumps(pilot, ensure_ascii=False, indent=2), encoding='utf-8')
+   aux_report={**aux_report, 'leakage_gate': leakage, 'pilot_bm25': pilot_metrics}
    manifests.append({**src,'status':'loaded','report':aux_report}); all_records.extend(recs); continue
   if kind not in LOCAL_SOURCE_KINDS:
    manifests.append({**src,'status':'skipped_unsupported'}); continue
