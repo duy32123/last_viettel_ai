@@ -34,3 +34,22 @@ def test_auxiliary_alias_retrieval_and_deterministic_pilot_split():
         for ex in examples:
             assert ex["metadata"]["official_evaluation"] is False
             assert ex["positive_code"] not in ex["hard_negative_codes"]
+
+def test_prepare_linking_kb_hf_auxiliary_config_no_path_required(tmp_path, monkeypatch):
+    import json, sys
+    from pathlib import Path
+    import scripts.prepare_linking_kb as prep
+    cfg=json.loads(Path('configs/linking_kb.hf_auxiliary.yaml').read_text(encoding='utf-8'))
+    assert cfg['sources'][0]['enabled'] is True and 'path' not in cfg['sources'][0]
+    cfg['output_dir']=str(tmp_path/'kb')
+    cfg_path=tmp_path/'hf_aux.yaml'; cfg_path.write_text(json.dumps(cfg, ensure_ascii=False), encoding='utf-8')
+    monkeypatch.setattr(prep, 'rows_from_hf', lambda split=None: rows())
+    monkeypatch.setattr(sys, 'argv', ['prepare_linking_kb.py','--config',str(cfg_path)])
+    prep.main()
+    out=Path(cfg['output_dir'])
+    assert (out/'icd10.jsonl').exists()
+    assert (out/'manifest.json').exists()
+    assert (out/'auxiliary_pilot_examples.json').exists()
+    entries=[json.loads(l) for l in (out/'icd10.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert entries and all(e['verified'] is False for e in entries)
+    assert all(e['metadata']['official_kb'] is False for e in entries)
