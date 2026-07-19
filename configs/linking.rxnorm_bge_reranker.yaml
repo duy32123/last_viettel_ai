@@ -1,0 +1,20 @@
+{
+  "kb_dir": "data/processed/linking_kb_rxnorm",
+  "index_dir": "data/processed/linking_index_rxnorm",
+  "dense_index_dir": "data/processed/linking_dense_rxnorm_bge_m3",
+  "production": true,
+  "include_unverified": false,
+  "top_k": 20,
+  "mode": "hybrid_rrf",
+  "model_name": "BAAI/bge-m3",
+  "model_revision": "main",
+  "batch_size": 16,
+  "max_length": 8192,
+  "reranker_model_name": "BAAI/bge-reranker-v2-m3",
+  "reranker_model_revision": "main",
+  "reranker_batch_size": 16,
+  "reranker_max_length": 8192,
+  "use_bge": true,
+  "use_reranker": true,
+  "official_evaluation": false
+}

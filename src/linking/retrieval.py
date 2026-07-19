@@ -29,15 +29,15 @@ class LexicalIndex:
         term=ROUTE.get(entity_type)
         if not term: return []
         nm=normalize_mention(mention, entity_type); queries=[nm['base'],nm['normalized'],nm['base_no_diacritic'],nm['no_diacritic']]
-        hits=[]; seen=set()
+        hits=[]; seen=set(); drug_features=nm.get('features',{})
         def add(idx,score,method):
             r=self.records[idx]; key=(r.terminology,r.version,r.code)
             if key in seen: return
-            seen.add(key); hits.append(Candidate(r.code,r.terminology,r.canonical_name,score,score,None,None,r.verified,r.source,r.version,method))
+            seen.add(key); cand=Candidate(r.code,r.terminology,r.canonical_name,score,score,None,None,r.verified,r.source,r.version,method); cand.tty=r.metadata.get('TTY'); cand.specificity=r.metadata.get('specificity'); cand.matched_alias=name; hits.append(cand)
         for q in queries:
             for idx,name in self.exact.get((term,q),[]): add(idx,1.0,'exact' if normalize_text(self.records[idx].canonical_name) == q else 'alias')
         if len(hits)<top_k:
-            qtok=Counter(_tokens(nm['base_no_diacritic'])); N=max(1,len(self.records)); scores=[]
+            qtok=Counter(_tokens(nm['no_diacritic'] if term == 'RxNorm' and drug_features else nm['base_no_diacritic'])); N=max(1,len(self.records)); scores=[]
             for idx,name,dtok in self.names:
                 r=self.records[idx]
                 if r.terminology!=term: continue
@@ -54,7 +54,21 @@ class LexicalIndex:
                 if r.terminology==term: scores.append((difflib.SequenceMatcher(None,q,normalize_text(name,True)).ratio(),idx))
             for s,idx in sorted(scores, key=lambda x:(-x[0], self.records[x[1]].code)):
                 if s>=0.82: add(idx, s*0.75, 'fuzzy')
-        return sorted(hits, key=lambda c:(-c.score,c.terminology,c.code))[:top_k]
+
+        def med_key(c):
+            if term != 'RxNorm': return (-c.score,c.terminology,c.code)
+            spec=getattr(c,'specificity',None); has_detail=bool(drug_features.get('strength') or drug_features.get('dose_form'))
+            pref=0
+            if has_detail and spec=='product': pref=-0.08
+            elif not has_detail and spec=='ingredient': pref=-0.08
+            elif not has_detail and spec=='product': pref=0.08
+            elif spec=='brand': pref=0.0
+            return (pref,-c.score,c.code)
+
+        rows=sorted(hits, key=med_key)[:top_k]
+        for i,c in enumerate(rows,1):
+            c.rank=i; c.retrieval_method=c.match_method
+        return rows
 
 def report_records(records:list[KBRecord])->dict[str,Any]:
     by=Counter((r.terminology,r.version,r.source) for r in records); tty=Counter(r.metadata.get('TTY') for r in records if r.metadata.get('TTY'))

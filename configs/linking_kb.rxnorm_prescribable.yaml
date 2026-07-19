@@ -1,0 +1,11 @@
+{
+  "source_kind": "rxnorm_prescribable_zip",
+  "zip_path": "data/raw/rxnorm/RxNorm_full_prescribe_current.zip",
+  "output_dir": "data/processed/linking_kb_rxnorm",
+  "version": "override-required",
+  "release_date": null,
+  "source_url": "https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html",
+  "official_kb": true,
+  "production": true,
+  "verified": true
+}
