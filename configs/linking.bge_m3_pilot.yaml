@@ -11,6 +11,18 @@
   "batch_size": 16,
   "max_length": 8192,
   "use_bge": true,
-  "use_reranker": false,
-  "official_evaluation": false
+  "use_reranker": true,
+  "official_evaluation": false,
+  "reranker_model_name": "BAAI/bge-reranker-v2-m3",
+  "reranker_model_revision": "main",
+  "reranker_batch_size": 16,
+  "reranker_max_length": 8192,
+  "candidate_strategy": "auto_dev",
+  "blend_weights": [
+    0.0,
+    0.25,
+    0.5,
+    0.75,
+    1.0
+  ]
 }
