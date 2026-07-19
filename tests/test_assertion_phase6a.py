@@ -2,7 +2,7 @@ import json
 import warnings
 import pytest
 from src.data.assertion_generator import AssertionGenConfig, build_assertion_corpus, canonical_hash
-from src.models.assertion.inference import predict_assertions, merge_rule_model, serialize_assertions, load_thresholds
+from src.models.assertion.inference import predict_assertions, merge_rule_model, serialize_assertions, load_thresholds, _model_scores
 from src.models.assertion.labels import ASSERTION_LABELS, to_vector, from_scores
 from src.models.assertion.metrics import multilabel_metrics, tune_thresholds
 from src.models.assertion.preprocess import make_examples, register_special_tokens, SPECIAL_TOKENS, tokenize_examples, FloatMultilabelCollator, assert_float_multilabel_batch
@@ -179,7 +179,7 @@ def test_offline_trainer_step_save_reload_and_model_inference(tmp_path):
     pytest.importorskip("transformers")
     from transformers import BertConfig, BertForSequenceClassification, BertTokenizerFast, Trainer, TrainingArguments
     from datasets import Dataset
-    vocab=["[PAD]","[UNK]","[CLS]","[SEP]","[MASK]"] + SPECIAL_TOKENS + ["Không","ghi","nhận","đau","ngực","Mẹ","bệnh","nhân","có","sốt","Theo","dõi","."]
+    vocab=["[PAD]","[UNK]","[CLS]","[SEP]","[MASK]"] + SPECIAL_TOKENS + ["Không","ghi","nhận","đau","ngực","Mẹ","bệnh","nhân","có","sốt","Theo","dõi","Tiền","sử","gia","đình","."]
     vocab_path=tmp_path/"vocab.txt"; vocab_path.write_text("\n".join(vocab), encoding="utf-8")
     tok=BertTokenizerFast(vocab_file=str(vocab_path), do_lower_case=False)
     cfg=BertConfig(vocab_size=len(tok)+len(SPECIAL_TOKENS), hidden_size=24, num_hidden_layers=1, num_attention_heads=2, intermediate_size=32, num_labels=3, problem_type="multi_label_classification")
@@ -199,8 +199,19 @@ def test_offline_trainer_step_save_reload_and_model_inference(tmp_path):
     ckpt=tmp_path/"ckpt"; trainer.save_model(str(ckpt)); tok.save_pretrained(str(ckpt))
     (ckpt/"thresholds.json").write_text(json.dumps({l:0.0 for l in ASSERTION_LABELS}), encoding="utf-8")
     reloaded=BertForSequenceClassification.from_pretrained(str(ckpt))
-    out=predict_assertions("Theo dõi đau ngực.", [ent("Theo dõi đau ngực.","đau ngực","TRIỆU_CHỨNG")], model=reloaded, tokenizer=BertTokenizerFast.from_pretrained(str(ckpt)), thresholds={l:0.0 for l in ASSERTION_LABELS})
-    assert out[0]["assertions"] == ASSERTION_LABELS
+    reloaded_tok=BertTokenizerFast.from_pretrained(str(ckpt))
+    neutral_text="Theo dõi đau ngực."
+    neutral_ent=ent(neutral_text,"đau ngực","TRIỆU_CHỨNG")
+    scores=_model_scores(neutral_text, [neutral_ent], reloaded, reloaded_tok, batch_size=1)
+    assert len(scores) == 1 and len(scores[0]) == 3
+    assert all(0.0 <= float(p) <= 1.0 for p in scores[0])
+    assert all(torch.isfinite(torch.tensor(scores[0])))
+    out=predict_assertions(neutral_text, [neutral_ent], model=reloaded, tokenizer=reloaded_tok, thresholds={l:0.0 for l in ASSERTION_LABELS})
+    assert out[0]["assertions"] == []
+    cue_text="Tiền sử gia đình không ghi nhận đau ngực."
+    cue_ent=ent(cue_text,"đau ngực","TRIỆU_CHỨNG")
+    out=predict_assertions(cue_text, [cue_ent], model=reloaded, tokenizer=reloaded_tok, thresholds={l:0.0 for l in ASSERTION_LABELS})
+    assert out[0]["assertions"] == ["isNegated","isFamily","isHistorical"]
 
 def test_training_argument_compatibility_report_to_none_and_trainer_tokenizer_fallback():
     class ArgsEval:
