@@ -21,5 +21,6 @@
   "pilot_default_max_codes": 800,
   "pilot_default_examples_per_code": 4,
   "pilot_seed": 13,
-  "fuzzy": false
+  "fuzzy": false,
+  "retrieval_depth": 100
 }

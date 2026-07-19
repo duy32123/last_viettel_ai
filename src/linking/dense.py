@@ -87,9 +87,14 @@ def alias_entries(records:list[KBRecord], include_unverified=False):
     return entries
 
 class DenseAliasIndex:
-    def __init__(self, entries:list[AliasEntry], vectors:list[list[float]], manifest:dict[str,Any]|None=None):
-        self.entries=entries; self.vectors=[l2_normalize(v) for v in vectors]; self.manifest=manifest or {}
-        self.matrix = np.asarray(self.vectors, dtype='float32') if np is not None and self.vectors else None
+    def __init__(self, entries:list[AliasEntry], vectors, manifest:dict[str,Any]|None=None, *, already_normalized:bool=False):
+        self.entries=entries; self.manifest=manifest or {}
+        if np is not None and hasattr(vectors, 'shape'):
+            self.matrix=vectors.astype('float32', copy=False)
+            self.vectors=[]
+        else:
+            self.vectors=[list(map(float, v if already_normalized else l2_normalize(v))) for v in vectors]
+            self.matrix = np.asarray(self.vectors, dtype='float32') if np is not None and self.vectors else None
     @classmethod
     def build(cls, records, encoder, include_unverified=False, manifest=None):
         entries=alias_entries(records, include_unverified); vecs=encoder.encode([e.alias for e in entries]) if entries else []
@@ -98,20 +103,33 @@ class DenseAliasIndex:
         raise RuntimeError('DenseAliasIndex.search requires an explicit encoder or query vector; use search_with_encoder() or search_vector()')
     def search_with_encoder(self, query, encoder, top_k=10):
         return self.search_vector(encoder.encode([query])[0], top_k)
+    def _dim(self):
+        if self.matrix is not None and getattr(self.matrix, 'ndim', 0)==2: return int(self.matrix.shape[1])
+        return len(self.vectors[0]) if self.vectors else 0
     def _scores(self, qvec):
+        if self.vectors:
+            return [dot(qvec, v) for v in self.vectors]
         if self.matrix is not None:
-            return [float(x) for x in (self.matrix @ np.asarray(qvec, dtype='float32'))]
-        return [dot(qvec, v) for v in self.vectors]
+            return self.matrix @ np.asarray(qvec, dtype='float32')
+        return []
     def search_vector(self, qvec, top_k=10):
-        if self.vectors and len(qvec) != len(self.vectors[0]): raise ValueError(f'query/index dimension mismatch: {len(qvec)} != {len(self.vectors[0])}')
+        dim=self._dim()
+        if dim and len(qvec) != dim: raise ValueError(f'query/index dimension mismatch: {len(qvec)} != {dim}')
         norm=math.sqrt(sum(float(x)*float(x) for x in qvec)) or 0.0
         if not all(math.isfinite(float(x)) for x in qvec) or abs(norm-1.0)>1e-4: raise ValueError('query vector must be finite and L2-normalized')
+        scores=self._scores(qvec); n=len(self.entries); k=min(max(1, int(top_k)), n)
+        alias_k=min(n, max(k, k*5))
+        if np is not None and hasattr(scores, 'shape') and n>alias_k:
+            idxs=np.argpartition(-scores, alias_k-1)[:alias_k]
+            order=sorted((int(i) for i in idxs), key=lambda i:(-float(scores[i]), self.entries[i].code, self.entries[i].alias))
+        else:
+            order=sorted(range(n), key=lambda i:(-float(scores[i]), self.entries[i].code, self.entries[i].alias))[:alias_k]
         best={}
-        for e,s in zip(self.entries,self._scores(qvec)):
-            cur=best.get(e.code)
+        for i in order:
+            e=self.entries[i]; s=float(scores[i]); cur=best.get(e.code)
             if cur is None or s>cur['score'] or (s==cur['score'] and e.alias<cur['matched_alias']):
                 best[e.code]={'code':e.code,'canonical_name':e.canonical_name,'terminology':e.terminology,'score':s,'matched_alias':e.alias,'verified':e.verified,'source':e.source,'version':e.version,'retrieval_method':'bge_dense'}
-        rows=sorted(best.values(), key=lambda x:(-x['score'], x['code']))[:top_k]
+        rows=sorted(best.values(), key=lambda x:(-x['score'], x['code']))[:k]
         for i,r in enumerate(rows,1): r['rank']=i
         return rows
 
@@ -120,11 +138,29 @@ def kb_checksum(paths):
     for p in sorted(Path(x) for x in paths): h.update(file_sha256(p).encode())
     return h.hexdigest()
 
+
+def dense_expected_manifest(cfg:dict, kb_paths, *, dimension:int|None=None, candidate_universe:int|None=None):
+    out={'schema_version':1,'model_name':cfg.get('model_name','BAAI/bge-m3'),'model_revision':cfg.get('model_revision','main'),'encoder_backend':cfg.get('encoder_backend','FlagEmbedding.BGEM3FlagModel'),'dtype':cfg.get('dtype','float32'),'normalization':'l2','kb_checksum':kb_checksum(kb_paths) if kb_paths else None,'include_unverified':bool(cfg.get('include_unverified',False)),'max_length':int(cfg.get('max_length',8192)),'batch_size':int(cfg.get('batch_size',16)),'mock_encoder':False}
+    if dimension is not None: out['dimension']=int(dimension)
+    if candidate_universe is not None: out['candidate_universe']=int(candidate_universe)
+    return out
+
+def validate_dense_manifest(manifest:dict, expected:dict):
+    required={'schema_version','model_name','model_revision','encoder_backend','dimension','dtype','normalization','kb_checksum','include_unverified','max_length','batch_size','candidate_universe','mock_encoder'}
+    missing=sorted(required-set(manifest))
+    if missing: raise ValueError(f'dense manifest missing required fields: {missing}')
+    for k,v in expected.items():
+        if k in manifest and manifest.get(k)!=v: raise ValueError(f'stale dense cache for {k}')
+    if manifest.get('normalization')!='l2': raise ValueError('dense cache normalization must be l2')
+    return True
+
 def save_dense_index(index:DenseAliasIndex, out_dir:Path, manifest:dict):
     out_dir.mkdir(parents=True, exist_ok=True)
+    manifest={**manifest}
+    manifest.setdefault('schema_version',1); manifest.setdefault('model_revision','main'); manifest.setdefault('encoder_backend','FlagEmbedding.BGEM3FlagModel'); manifest.setdefault('dtype','float32'); manifest.setdefault('normalization','l2'); manifest.setdefault('include_unverified',False); manifest.setdefault('max_length',8192); manifest.setdefault('batch_size',16); manifest.setdefault('candidate_universe',len({e.code for e in index.entries})); manifest.setdefault('mock_encoder',False); manifest.setdefault('dimension', index._dim())
 
     if np is not None:
-        np.save(out_dir/'embeddings.npy', np.asarray(index.vectors, dtype='float32'))
+        np.save(out_dir/'embeddings.npy', index.matrix if index.matrix is not None else np.asarray(index.vectors, dtype='float32'))
     else:
         (out_dir/'embeddings.json').write_text(json.dumps(index.vectors), encoding='utf-8')
     (out_dir/'alias_to_code.json').write_text(json.dumps([e.__dict__ for e in index.entries], ensure_ascii=False, indent=2), encoding='utf-8')
@@ -133,18 +169,22 @@ def save_dense_index(index:DenseAliasIndex, out_dir:Path, manifest:dict):
 def load_dense_index(out_dir:Path, expected:dict):
     if not (out_dir/'dense_manifest.json').exists(): raise FileNotFoundError(f'dense index missing: {out_dir}')
     manifest=json.loads((out_dir/'dense_manifest.json').read_text())
-    for k,v in expected.items():
-        if manifest.get(k)!=v: raise ValueError(f'stale dense cache for {k}')
+    validate_dense_manifest(manifest, expected)
     entries=[AliasEntry(**d) for d in json.loads((out_dir/'alias_to_code.json').read_text())]
-
+    dim=int(manifest['dimension'])
     if (out_dir/'embeddings.npy').exists() and np is not None:
-        vecs=np.load(out_dir/'embeddings.npy').astype('float32').tolist()
-    else:
-        vecs=json.loads((out_dir/'embeddings.json').read_text())
-    dim=manifest.get('dimension') or (len(vecs[0]) if vecs else 0)
+        matrix=np.load(out_dir/'embeddings.npy', mmap_mode='r')
+        if matrix.ndim!=2 or matrix.shape[1]!=dim: raise ValueError('dense cache vector dimension mismatch')
+        for start in range(0, matrix.shape[0], 4096):
+            chunk=np.asarray(matrix[start:start+4096], dtype='float32')
+            if not np.isfinite(chunk).all(): raise ValueError('dense cache vectors contain non-finite values')
+            norms=np.linalg.norm(chunk, axis=1)
+            if not np.allclose(norms, 1.0, atol=1e-4): raise ValueError('dense cache vectors are not L2-normalized')
+        return DenseAliasIndex(entries, matrix, manifest, already_normalized=True)
+    vecs=json.loads((out_dir/'embeddings.json').read_text())
     if vecs and any(len(v)!=dim for v in vecs): raise ValueError('dense cache vector dimension mismatch')
     if vecs and any(abs(math.sqrt(sum(float(x)*float(x) for x in v))-1.0)>1e-4 for v in vecs): raise ValueError('dense cache vectors are not L2-normalized')
-    return DenseAliasIndex(entries, vecs, manifest)
+    return DenseAliasIndex(entries, vecs, manifest, already_normalized=True)
 
 
 def candidate_passage(candidate:dict)->str:

@@ -71,11 +71,12 @@ def test_candidate_membership_after_mock_rerank_unchanged():
 
 
 def _runtime_fixture(tmp_path):
-    from src.linking.dense import DenseAliasIndex, MockDenseEncoder, save_dense_index, kb_checksum
+    from src.linking.dense import DenseAliasIndex, MockDenseEncoder, save_dense_index, dense_expected_manifest
     kb=tmp_path/'kb'; write_jsonl(kb/'rxnorm.jsonl', recs())
     idx_dir=tmp_path/'lex'; save_lexical_index(LexicalIndex(recs()), idx_dir, [kb/'rxnorm.jsonl'])
     dense_dir=tmp_path/'dense'; paths=[kb/'rxnorm.jsonl']
-    manifest={'model_name':'test-dense','model_revision':'r1','kb_checksum':kb_checksum(paths),'normalization':'l2','include_unverified':False,'max_length':32,'dimension':4}
+    cfg_dense={'model_name':'test-dense','model_revision':'r1','include_unverified':False,'max_length':32,'batch_size':2}
+    manifest=dense_expected_manifest(cfg_dense, paths, dimension=4, candidate_universe=4)
     save_dense_index(DenseAliasIndex.build(recs(), MockDenseEncoder(dim=4), include_unverified=False, manifest=manifest), dense_dir, manifest)
     pilot=tmp_path/'pilot.json'
     from scripts import build_rxnorm_pilot
@@ -145,3 +146,45 @@ def test_split_leakage_gate_and_production_excludes_unverified(tmp_path):
     bad=tmp_path/'badcfg.json'; bad.write_text(json.dumps(badcfg))
     with pytest.raises(ValueError, match='unverified'):
         ev.main(['--config',str(bad),'--pilot-examples',str(pilot),'--mode','bm25'])
+
+
+def test_dense_builder_manifest_loads_in_evaluator_and_revision_stale_fails(tmp_path, monkeypatch):
+    from scripts import build_dense_linking_index as bd, evaluate_rxnorm_linking as ev
+    from src.linking.dense import MockDenseEncoder
+    kb=tmp_path/'kb'; write_jsonl(kb/'rxnorm.jsonl', recs())
+    idx=tmp_path/'lex'; save_lexical_index(LexicalIndex(recs()), idx, [kb/'rxnorm.jsonl'])
+    pilot=tmp_path/'pilot.json'
+    from scripts import build_rxnorm_pilot
+    build_rxnorm_pilot.main(['--kb-dir',str(kb),'--output',str(pilot),'--max-codes','4','--examples-per-code','2'])
+    dense_dir=tmp_path/'dense'
+    cfg={'kb_dir':str(kb),'index_dir':str(idx),'dense_index_dir':str(dense_dir),'production':True,'include_unverified':False,'top_k':4,'retrieval_depth':3,'model_name':'test-dense','model_revision':'r1','max_length':32,'batch_size':2}
+    cfg_path=tmp_path/'cfg.json'; cfg_path.write_text(json.dumps(cfg))
+    class SpyDense:
+        def __init__(self, *a, **kw): self.enc=MockDenseEncoder(dim=4); self.device='cpu'
+        def encode(self, texts): return self.enc.encode(texts)
+    monkeypatch.setattr(bd, 'BGEM3Backend', SpyDense); monkeypatch.setattr(ev, 'BGEM3Backend', SpyDense)
+    bd.main.__globals__['sys'].argv=['build_dense_linking_index.py','--config',str(cfg_path)]
+    bd.main()
+    out=ev.main(['--config',str(cfg_path),'--pilot-examples',str(pilot),'--mode','bge_dense'])
+    assert out['cache_validation']=='valid' and out['retrieval_depth']==3
+    cfg['model_revision']='stale'; cfg_path.write_text(json.dumps(cfg))
+    with pytest.raises(ValueError, match='stale dense cache'):
+        ev.main(['--config',str(cfg_path),'--pilot-examples',str(pilot),'--mode','bge_dense'])
+
+
+def test_dense_mmap_and_argpartition_topk_path(tmp_path, monkeypatch):
+    import src.linking.dense as dense_mod
+    if dense_mod.np is None: pytest.skip('numpy unavailable')
+    from src.linking.dense import DenseAliasIndex, MockDenseEncoder, save_dense_index, load_dense_index, dense_expected_manifest
+    kb=tmp_path/'kb'; write_jsonl(kb/'rxnorm.jsonl', recs()); paths=[kb/'rxnorm.jsonl']
+    manifest=dense_expected_manifest({'model_name':'m','model_revision':'r','include_unverified':False,'max_length':32,'batch_size':2}, paths, dimension=4, candidate_universe=4)
+    dense_dir=tmp_path/'dense'; save_dense_index(DenseAliasIndex.build(recs(), MockDenseEncoder(dim=4), False, manifest), dense_dir, manifest)
+    calls={'load':0,'argpartition':0}
+    real_load=dense_mod.np.load; real_arg=dense_mod.np.argpartition
+    def spy_load(*args, **kwargs):
+        assert kwargs.get('mmap_mode')=='r'; calls['load']+=1; return real_load(*args, **kwargs)
+    def spy_arg(*args, **kwargs): calls['argpartition']+=1; return real_arg(*args, **kwargs)
+    monkeypatch.setattr(dense_mod.np, 'load', spy_load); monkeypatch.setattr(dense_mod.np, 'argpartition', spy_arg)
+    idx=load_dense_index(dense_dir, manifest)
+    idx.search_vector(MockDenseEncoder(dim=4).encode(['metformin'])[0], top_k=2)
+    assert calls['load']==1 and calls['argpartition']>=1
