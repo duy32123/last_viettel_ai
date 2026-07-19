@@ -77,3 +77,74 @@ def test_reranker_candidate_membership_gate():
     cands=[{'code':'1','canonical_name':'metformin','matched_alias':'metformin','score':1.0,'rank':1},{'code':'2','canonical_name':'Glucophage','matched_alias':'Glucophage','score':0.5,'rank':2}]
     out=rerank_candidates('Glucophage', cands, MockReranker({('Glucophage','Glucophage'):2.0}), batch_size=1)
     assert {r['code'] for r in out} == {'1','2'} and out[0]['code']=='2'
+
+
+def test_checksums_computed_once_for_multi_concept_import(tmp_path, monkeypatch):
+    import src.data.import_rxnorm as rx
+    z=make_zip(tmp_path,[conso('1', name='drug a'), conso('2', name='drug b')])
+    calls={'file':0,'member':0}
+    monkeypatch.setattr(rx, 'file_sha256', lambda path: calls.__setitem__('file', calls['file']+1) or 'zipsha')
+    monkeypatch.setattr(rx, 'rrf_member_sha256', lambda path, filename='RXNCONSO.RRF': calls.__setitem__('member', calls['member']+1) or 'rrfsha')
+    records, report=rx.import_rxnorm_prescribable(z, version='v')
+    assert len(records)==2 and calls == {'file':1,'member':1}
+    assert {r.metadata['zip_checksum'] for r in records} == {'zipsha'}
+    assert {r.metadata['rxnconso_checksum'] for r in records} == {'rrfsha'}
+    assert len({r.metadata['import_timestamp'] for r in records}) == 1
+
+
+def test_missing_rxnconso_and_invalid_zip_fail(tmp_path):
+    missing=tmp_path/'missing.zip'
+    with zipfile.ZipFile(missing,'w') as z: z.writestr('RXNREL.RRF','')
+    with pytest.raises(ValueError, match='missing RXNCONSO'):
+        import_rxnorm_prescribable(missing, version='v')
+    bad=tmp_path/'bad.zip'; bad.write_text('not a zip')
+    with pytest.raises(ValueError, match='invalid RxNorm ZIP'):
+        import_rxnorm_prescribable(bad, version='v')
+
+
+def test_zero_accepted_rows_fail_and_filter_report_is_available(tmp_path):
+    z=make_zip(tmp_path,[conso('1', sab='MTHSPL', name='bad'), conso('2', suppress='Y', name='suppressed')])
+    with pytest.raises(ValueError, match='accepted_rows=0'):
+        import_rxnorm_prescribable(z, version='v')
+
+
+def test_rxnrel_keeps_only_relationships_touching_accepted_rxcui(tmp_path):
+    rel_good='1||RXCUI|has_ingredient|999||RXCUI|ingredient_of|R1||RXNORM|| |||N|'
+    rel_drop='888||RXCUI|has_ingredient|999||RXCUI|ingredient_of|R2||RXNORM|| |||N|'
+    z=make_zip(tmp_path,[conso('1', name='drug a')],[rel_good, rel_drop])
+    records, report=import_rxnorm_prescribable(z, version='v')
+    assert report['rxnrel_rows']==2 and report['rxnrel_kept_rows']==1
+    assert records[0].metadata['relationships'][0]['target_rxcui']=='999'
+
+
+def test_prepare_md5_mismatch_and_atomic_output_preserves_old_file(tmp_path):
+    from scripts import prepare_rxnorm_kb as prep
+    z=make_zip(tmp_path,[conso('1', name='drug a')])
+    cfg={'zip_path':str(z),'output_dir':str(tmp_path/'out'),'version':'v','source_url':'url'}
+    cfg_path=tmp_path/'cfg.json'; cfg_path.write_text(json.dumps(cfg))
+    with pytest.raises(SystemExit, match='MD5 mismatch'):
+        prep.main(['--config',str(cfg_path),'--expected-md5','deadbeef'])
+    out=tmp_path/'out'; out.mkdir(); old=out/'rxnorm.jsonl'; old.write_text('old', encoding='utf-8')
+    bad_cfg={**cfg,'zip_path':str(tmp_path/'bad.zip')}; (tmp_path/'bad.zip').write_text('bad')
+    bad_path=tmp_path/'badcfg.json'; bad_path.write_text(json.dumps(bad_cfg))
+    with pytest.raises(ValueError): prep.main(['--config',str(bad_path)])
+    assert old.read_text(encoding='utf-8') == 'old'
+
+
+def test_fetch_streams_chunks_and_md5_mismatch(tmp_path, monkeypatch):
+    from scripts import fetch_rxnorm_prescribable as fetch
+    payload=b'abc123'
+    class Resp:
+        def __init__(self): self.i=0
+        def __enter__(self): return self
+        def __exit__(self,*args): return False
+        def read(self, size=-1):
+            assert size != -1
+            if self.i >= len(payload): return b''
+            chunk=payload[self.i:self.i+2]; self.i += 2; return chunk
+    monkeypatch.setattr(fetch.urllib.request, 'urlopen', lambda req: Resp())
+    out=tmp_path/'rx.zip'
+    fetch.main(['--url','https://example.invalid/rx.zip','--output',str(out)])
+    assert out.read_bytes()==payload and not (tmp_path/'rx.zip.part').exists()
+    with pytest.raises(SystemExit, match='MD5 mismatch'):
+        fetch.main(['--url','https://example.invalid/rx.zip','--output',str(tmp_path/'rx2.zip'),'--expected-md5','deadbeef'])

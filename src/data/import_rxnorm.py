@@ -44,9 +44,12 @@ def rrf_member_sha256(path: Path, filename: str='RXNCONSO.RRF') -> str|None:
     return file_sha256(path)
 
 def _zip_member(zip_path: Path, suffix: str) -> str|None:
-    with zipfile.ZipFile(zip_path) as z:
-        matches=[n for n in z.namelist() if n.endswith(suffix)]
-        return sorted(matches)[0] if matches else None
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            matches=[n for n in z.namelist() if n.endswith(suffix)]
+            return sorted(matches)[0] if matches else None
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f'invalid RxNorm ZIP: {zip_path}') from exc
 
 def _iter_rrf_lines(path: Path, filename: str="RXNCONSO.RRF"):
     if path.is_dir():
@@ -91,33 +94,56 @@ def _canonical(rows: list[dict[str,str]]) -> dict[str,str]:
         return (tty_rank, pref, row['STR'].casefold(), row['RXCUI'])
     return sorted(rows, key=key)[0]
 
-def _read_relationships(path: Path) -> dict[str,list[dict[str,str]]]:
-    rels=defaultdict(list)
+def _read_relationships(path: Path, accepted_rxcuis: set[str]) -> tuple[dict[str,list[dict[str,str]]], dict[str,Any]]:
+    rels=defaultdict(list); report={'rxnrel_missing_member':False,'rxnrel_rows':0,'rxnrel_kept_rows':0,'rxnrel_malformed_rows':0}
     try:
         iterator=_iter_rrf_lines(path, 'RXNREL.RRF')
         for line in iterator:
             if not line: continue
-            row=parse_rxnrel_line(line)
+            try: row=parse_rxnrel_line(line)
+            except ValueError:
+                report['rxnrel_malformed_rows'] += 1; continue
+            report['rxnrel_rows'] += 1
             if row.get('SAB')!='RXNORM' or row.get('SUPPRESS') not in ('','N'): continue
-            if row.get('RXCUI1') and row.get('RXCUI2'):
-                rels[row['RXCUI1']].append({'rela':row.get('RELA') or row.get('REL'),'target_rxcui':row['RXCUI2'],'source':'RXNREL.RRF'})
-                rels[row['RXCUI2']].append({'rela':row.get('RELA') or row.get('REL'),'target_rxcui':row['RXCUI1'],'source':'RXNREL.RRF'})
+            c1=row.get('RXCUI1'); c2=row.get('RXCUI2')
+            if not c1 or not c2 or (c1 not in accepted_rxcuis and c2 not in accepted_rxcuis): continue
+            report['rxnrel_kept_rows'] += 1
+            item1={'rela':row.get('RELA') or row.get('REL'),'target_rxcui':c2,'source':'RXNREL.RRF'}
+            item2={'rela':row.get('RELA') or row.get('REL'),'target_rxcui':c1,'source':'RXNREL.RRF'}
+            if c1 in accepted_rxcuis: rels[c1].append(item1)
+            if c2 in accepted_rxcuis: rels[c2].append(item2)
     except FileNotFoundError:
-        pass
-    return dict(rels)
+        report['rxnrel_missing_member']=True
+    return dict(rels), report
 
 def import_rxnorm_prescribable(path: Path, *, version: str, source_url: str='', source: str='RxNorm Current Prescribable Content', release_date: str|None=None, term_types: set[str]|None=None) -> tuple[list[KBRecord], dict[str,Any]]:
     term_types=term_types or RX_TTYS; path=Path(path); rows_by_code=defaultdict(list); counts=Counter(); malformed=0
-    rxnconso_member=_zip_member(path,'RXNCONSO.RRF') if path.suffix.lower()=='.zip' else str(path/'RXNCONSO.RRF' if path.is_dir() else path)
+    import_timestamp=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    missing_member=False
+    try:
+        rxnconso_member=_zip_member(path,'RXNCONSO.RRF') if path.suffix.lower()=='.zip' else str(path/'RXNCONSO.RRF' if path.is_dir() else path)
+        if path.suffix.lower()=='.zip' and not rxnconso_member: missing_member=True
+        zip_checksum=file_sha256(path) if path.is_file() else None
+        rxnconso_checksum=rrf_member_sha256(path,'RXNCONSO.RRF')
+    except ValueError:
+        raise
+    if missing_member or not rxnconso_checksum:
+        raise ValueError(f'RxNorm import failed: missing RXNCONSO.RRF in {path}')
     for i,line in enumerate(_iter_rrf_lines(path,'RXNCONSO.RRF'),1):
         if not line: continue
         try: row=parse_rxnconso_line(line, line_number=i)
         except ValueError:
             malformed += 1; continue
         counts['rows_total'] += 1; counts[f"LAT:{row['LAT']}"] += 1; counts[f"SAB:{row['SAB']}"] += 1; counts[f"SUPPRESS:{row['SUPPRESS']}"] += 1; counts[f"TTY:{row['TTY']}"] += 1
-        if row['LAT']!='ENG' or row['SAB']!='RXNORM' or row['SUPPRESS']!='N' or row['TTY'] not in term_types: continue
+        if row['LAT']!='ENG': counts['filtered_lat'] += 1; continue
+        if row['SAB']!='RXNORM': counts['filtered_sab'] += 1; continue
+        if row['SUPPRESS']!='N': counts['filtered_suppress'] += 1; continue
+        if row['TTY'] not in term_types: counts['filtered_tty'] += 1; continue
         rows_by_code[row['RXCUI']].append(row); counts['accepted_rows'] += 1
-    rels=_read_relationships(path)
+    if counts['accepted_rows'] == 0:
+        raise ValueError(f'RxNorm import failed: accepted_rows=0 for {path}')
+    accepted_rxcuis=set(rows_by_code)
+    rels, rel_report=_read_relationships(path, accepted_rxcuis)
     records=[]; duplicate_aliases=0
     for rxcui,rows in sorted(rows_by_code.items(), key=lambda kv:int(kv[0]) if kv[0].isdigit() else kv[0]):
         canon=_canonical(rows); seen=set(); aliases=[]; prov=[]; tty_values=sorted({r['TTY'] for r in rows}, key=lambda t: TTY_PRECEDENCE.index(t) if t in TTY_PRECEDENCE else 999)
@@ -127,9 +153,11 @@ def import_rxnorm_prescribable(path: Path, *, version: str, source_url: str='', 
             seen.add(norm)
             if row['STR'] != canon['STR']: aliases.append(row['STR'])
             prov.append({'raw_alias':row['STR'],'normalized_alias':norm,'TTY':row['TTY'],'RXAUI':row['RXAUI'],'SAB':row['SAB'],'LAT':row['LAT'],'source_field':'STR'})
-        meta={'TTY':canon['TTY'],'TTY_values':tty_values,'specificity':_specificity(canon['TTY']),'alias_provenance':prov,'relationships':rels.get(rxcui,[]),'source_url':source_url,'release_date':release_date or version,'zip_checksum':file_sha256(path) if path.is_file() else None,'rxnconso_member':rxnconso_member,'rxnconso_checksum':rrf_member_sha256(path,'RXNCONSO.RRF'),'official_kb':True,'verified_source':True,'license_required':False,'nlm_attribution':NLM_ATTRIBUTION,'import_timestamp':time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+        meta={'TTY':canon['TTY'],'TTY_values':tty_values,'specificity':_specificity(canon['TTY']),'alias_provenance':prov,'relationships':rels.get(rxcui,[]),'source_url':source_url,'release_date':release_date or version,'zip_checksum':zip_checksum,'rxnconso_member':rxnconso_member,'rxnconso_checksum':rxnconso_checksum,'official_kb':True,'verified_source':True,'license_required':False,'nlm_attribution':NLM_ATTRIBUTION,'import_timestamp':import_timestamp}
         records.append(KBRecord(rxcui, canon['STR'], aliases, 'RxNorm', version, source, True, meta, 'drug', 'en'))
-    report={'source':source,'source_url':source_url,'version':version,'release_date':release_date or version,'official_kb':True,'verified':True,'rows_total':counts['rows_total'],'accepted_rows':counts['accepted_rows'],'concept_count':len(records),'malformed_rows':malformed,'counts_by_tty':{k.split(':',1)[1]:v for k,v in counts.items() if k.startswith('TTY:')},'accepted_tty':dict(Counter(r.metadata['TTY'] for r in records)),'duplicate_aliases':duplicate_aliases,'zip_checksum':file_sha256(path) if path.is_file() else None,'rxnconso_member':rxnconso_member,'rxnconso_checksum':rrf_member_sha256(path,'RXNCONSO.RRF'),'nlm_attribution':NLM_ATTRIBUTION,'license_required':False}
+    if not records:
+        raise ValueError(f'RxNorm import failed: concept_count=0 for {path}')
+    report={'source':source,'source_url':source_url,'version':version,'release_date':release_date or version,'official_kb':True,'verified':True,'rows_total':counts['rows_total'],'accepted_rows':counts['accepted_rows'],'concept_count':len(records),'missing_member':missing_member,'malformed_rows':malformed,'filtered_rows':{'LAT':counts['filtered_lat'],'SAB':counts['filtered_sab'],'SUPPRESS':counts['filtered_suppress'],'TTY':counts['filtered_tty']},'counts_by_tty':{k.split(':',1)[1]:v for k,v in counts.items() if k.startswith('TTY:')},'accepted_tty':dict(Counter(r.metadata['TTY'] for r in records)),'duplicate_aliases':duplicate_aliases,'zip_checksum':zip_checksum,'rxnconso_member':rxnconso_member,'rxnconso_checksum':rxnconso_checksum,'import_timestamp':import_timestamp,'nlm_attribution':NLM_ATTRIBUTION,'license_required':False, **rel_report}
     return records, report
 
 def import_rxnorm_rrf(path: Path, version: str, source: str="RxNorm", verified: bool=True, term_types: set[str]|None=None) -> list[KBRecord]:
