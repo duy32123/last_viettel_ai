@@ -1,0 +1,18 @@
+{
+  "output_dir": "data/processed/linking_kb_auxiliary",
+  "production": false,
+  "sources": [
+    {
+      "name": "birgermoell_icd10_clinical_notes_auxiliary",
+      "kind": "hf_icd_auxiliary",
+      "enabled": false,
+      "dataset": "birgermoell/icd10-clinical-notes",
+      "version": "hf-pilot",
+      "source_kind": "auxiliary_hf",
+      "official_kb": false,
+      "synthetic_notes": true,
+      "license": "CC-BY-4.0",
+      "verified": false
+    }
+  ]
+}

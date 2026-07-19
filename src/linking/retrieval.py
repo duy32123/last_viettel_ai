@@ -13,8 +13,8 @@ class Candidate:
 
 def _tokens(s): return [t for t in normalize_text(s, True).split() if t]
 class LexicalIndex:
-    def __init__(self, records:list[KBRecord]):
-        self.records=[r for r in records if r.verified]; self.names=[]; self.exact={}; self.df=Counter()
+    def __init__(self, records:list[KBRecord], include_unverified: bool=False):
+        self.records=[r for r in records if r.verified or include_unverified]; self.names=[]; self.exact={}; self.df=Counter()
         for i,r in enumerate(self.records):
             for name in [r.canonical_name,*r.aliases]:
                 for n in {normalize_text(name), normalize_text(name, True)}:

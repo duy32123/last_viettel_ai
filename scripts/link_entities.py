@@ -9,5 +9,5 @@ def main():
  p=argparse.ArgumentParser(); p.add_argument('input'); p.add_argument('--output', required=True); p.add_argument('--config', default='configs/linking.yaml'); ns=p.parse_args(); cfg=json.loads(Path(ns.config).read_text())
  root=Path(cfg.get('index_dir') or cfg['kb_dir']); records=[]
  for pth in root.glob('*.jsonl'): records.extend(read_jsonl(pth))
- linked=link_rows(load_jsonl(ns.input), LexicalIndex(records), int(cfg.get('top_k',5))); write_jsonl(ns.output, linked); print(json.dumps({'records':len(linked),'output':ns.output}, ensure_ascii=False))
+ linked=link_rows(load_jsonl(ns.input), LexicalIndex(records, bool(cfg.get('include_unverified', False))), int(cfg.get('top_k',5))); write_jsonl(ns.output, linked); print(json.dumps({'records':len(linked),'output':ns.output}, ensure_ascii=False))
 if __name__=='__main__': main()
