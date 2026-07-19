@@ -1,9 +1,8 @@
 from __future__ import annotations
-import hashlib, json, time
+import hashlib, json, time, math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-import math
 from src.data.kb_schema import KBRecord, file_sha256
 from src.linking.normalization import normalize_text
 from src.linking.retrieval import LexicalIndex
@@ -61,11 +60,13 @@ class DenseAliasIndex:
         entries=alias_entries(records, include_unverified); vecs=encoder.encode([e.alias for e in entries]) if entries else []
         return cls(entries, vecs, manifest)
     def search(self, query, top_k=10):
-        q=MockDenseEncoder(dim=len(self.vectors[0]) if self.vectors else 4).encode([query])[0]
-        return self.search_vector(q, top_k)
+        raise RuntimeError('DenseAliasIndex.search requires an explicit encoder or query vector; use search_with_encoder() or search_vector()')
     def search_with_encoder(self, query, encoder, top_k=10):
         return self.search_vector(encoder.encode([query])[0], top_k)
     def search_vector(self, qvec, top_k=10):
+        if self.vectors and len(qvec) != len(self.vectors[0]): raise ValueError(f'query/index dimension mismatch: {len(qvec)} != {len(self.vectors[0])}')
+        norm=math.sqrt(sum(float(x)*float(x) for x in qvec)) or 0.0
+        if not all(math.isfinite(float(x)) for x in qvec) or abs(norm-1.0)>1e-4: raise ValueError('query vector must be finite and L2-normalized')
         best={}
         for e,v in zip(self.entries,self.vectors):
             s=dot(qvec,v); cur=best.get(e.code)
@@ -87,11 +88,15 @@ def save_dense_index(index:DenseAliasIndex, out_dir:Path, manifest:dict):
     (out_dir/'dense_manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
 
 def load_dense_index(out_dir:Path, expected:dict):
+    if not (out_dir/'dense_manifest.json').exists(): raise FileNotFoundError(f'dense index missing: {out_dir}')
     manifest=json.loads((out_dir/'dense_manifest.json').read_text())
     for k,v in expected.items():
         if manifest.get(k)!=v: raise ValueError(f'stale dense cache for {k}')
     entries=[AliasEntry(**d) for d in json.loads((out_dir/'alias_to_code.json').read_text())]
     vecs=json.loads((out_dir/'embeddings.json').read_text())
+    dim=manifest.get('dimension') or (len(vecs[0]) if vecs else 0)
+    if vecs and any(len(v)!=dim for v in vecs): raise ValueError('dense cache vector dimension mismatch')
+    if vecs and any(abs(math.sqrt(sum(float(x)*float(x) for x in v))-1.0)>1e-4 for v in vecs): raise ValueError('dense cache vectors are not L2-normalized')
     return DenseAliasIndex(entries, vecs, manifest)
 
 def rrf_fuse(rankings:list[tuple[float,list[str]]], k=60, top_k=10):
@@ -104,11 +109,12 @@ def metrics_from_ranks(ranks):
     n=len(ranks) or 1
     return {'recall@1':sum(1 for r in ranks if r and r<=1)/n,'recall@5':sum(1 for r in ranks if r and r<=5)/n,'recall@10':sum(1 for r in ranks if r and r<=10)/n,'recall@20':sum(1 for r in ranks if r and r<=20)/n,'mrr':sum(1/r for r in ranks if r)/n}
 
-def tune_rrf(dev_examples, bm25_ranker, dense_ranker, weights=(0.5,1.0,2.0), ks=(10,60)):
+def tune_rrf(dev_examples, bm25_ranker, dense_ranker, weights=(0.0,0.5,1.0,2.0), ks=(10,60)):
     best=None
     for wb in weights:
       for wd in weights:
        for k in ks:
+        if wb == 0.0 and wd == 0.0: continue
         ranks=[]
         for ex in dev_examples:
             bm=bm25_ranker(ex); de=dense_ranker(ex); fused=rrf_fuse([(wb,bm),(wd,de)], k=k, top_k=20)

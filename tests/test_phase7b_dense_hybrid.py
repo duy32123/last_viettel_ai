@@ -38,3 +38,107 @@ def test_alias_holdout_and_runtime_schema_verified_default():
     idx=DenseAliasIndex.build(recs, MockDenseEncoder(), include_unverified=True)
     c=idx.search_with_encoder('Diabetes', MockDenseEncoder(), top_k=1)[0]
     assert {'code','canonical_name','terminology','score','rank','retrieval_method','matched_alias','verified','source'} <= set(c)
+
+
+def _write_kb_and_pilot(tmp_path, recs=None):
+    from src.data.kb_schema import write_jsonl
+    recs = recs or records()
+    kb_dir = tmp_path / 'kb'; write_jsonl(kb_dir / 'icd10.jsonl', recs)
+    pilot = {
+        'train': [{'id':'tr1','journal_note':'diabetes note','positive_code':'E11','language':'en'}],
+        'dev': [{'id':'dv1','journal_note':'hypertension note','positive_code':'I10','language':'en'}],
+        'test': [{'id':'ts1','journal_note':'asthma note','positive_code':'J45','language':'vi'}],
+    }
+    pilot_path = tmp_path / 'pilot.json'; pilot_path.write_text(json.dumps(pilot), encoding='utf-8')
+    return kb_dir, pilot_path
+
+
+def test_dense_search_requires_explicit_encoder_or_query_vector():
+    idx = DenseAliasIndex.build(records(), MockDenseEncoder(), include_unverified=True)
+    with pytest.raises(RuntimeError):
+        idx.search('Diabetes')
+    with pytest.raises(ValueError, match='dimension mismatch'):
+        idx.search_vector(l2_normalize([1.0, 0.0]), top_k=1)
+
+
+def test_bm25_full_ranking_returns_full_candidate_universe():
+    from scripts.evaluate_hybrid_linking import full_bm25_rank
+    idx = LexicalIndex(records(), include_unverified=True)
+    assert full_bm25_rank(idx, 'zzzz unmatched query', ['E11', 'I10', 'J45']) == ['E11', 'I10', 'J45']
+    assert len(full_bm25_rank(idx, 'Diabetes', ['E11', 'I10', 'J45'])) == 3
+
+
+def test_evaluator_explicit_mock_mode_is_invalid_and_non_hybrid_has_no_selected_on_dev(tmp_path, capsys):
+    from scripts.evaluate_hybrid_linking import main
+    kb_dir, pilot_path = _write_kb_and_pilot(tmp_path)
+    cfg = {'kb_dir': str(kb_dir), 'dense_index_dir': str(tmp_path/'dense'), 'include_unverified': True, 'mode': 'bge_dense', 'model_name': 'test-model', 'model_revision': 'r1', 'max_length': 32, 'batch_size': 2}
+    cfg_path = tmp_path / 'cfg.json'; cfg_path.write_text(json.dumps(cfg), encoding='utf-8')
+    out = main(['--config', str(cfg_path), '--pilot-examples', str(pilot_path), '--mode', 'bge_dense', '--mock-dense'])
+    assert out['mock_encoder'] is True
+    assert out['readiness'] == 'INVALID_MOCK_RUN'
+    assert 'selected_on_dev' not in out
+    assert out['dense_preflight']['used_mock_encoder'] is True
+
+
+def test_normal_evaluator_loads_persisted_vectors_and_fails_when_stale(tmp_path, monkeypatch):
+    from src.data.kb_schema import write_jsonl
+    from src.linking.dense import kb_checksum
+    from scripts import evaluate_hybrid_linking as ev
+    recs = records(); kb_dir, pilot_path = _write_kb_and_pilot(tmp_path, recs)
+    checksum = kb_checksum([kb_dir / 'icd10.jsonl'])
+    dense_dir = tmp_path / 'dense'
+    manifest = {'model_name':'test-model','model_revision':'r1','kb_checksum':checksum,'normalization':'l2','include_unverified':True,'max_length':32,'dimension':4}
+    idx = DenseAliasIndex.build(recs, MockDenseEncoder(), include_unverified=True, manifest=manifest)
+    save_dense_index(idx, dense_dir, manifest)
+    cfg = {'kb_dir': str(kb_dir), 'dense_index_dir': str(dense_dir), 'include_unverified': True, 'mode': 'bge_dense', 'model_name': 'test-model', 'model_revision': 'r1', 'max_length': 32, 'batch_size': 2}
+    cfg_path = tmp_path / 'cfg.json'; cfg_path.write_text(json.dumps(cfg), encoding='utf-8')
+    class FakeBackend:
+        def __init__(self, **kwargs): self.device='cpu'; self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): return self.enc.encode(texts)
+    monkeypatch.setattr(ev, 'BGEM3Backend', FakeBackend)
+    out = ev.main(['--config', str(cfg_path), '--pilot-examples', str(pilot_path), '--mode', 'bge_dense'])
+    assert out['mock_encoder'] is False
+    assert out['dense_preflight']['cache_validation_result'] == 'valid'
+    assert out['dense_preflight']['query_vector_count'] == 3
+    assert out['diagnostic_exact_alias']['query_vector_count'] == 6
+    cfg['model_revision'] = 'stale'; cfg_path.write_text(json.dumps(cfg), encoding='utf-8')
+    with pytest.raises(ValueError, match='stale dense cache'):
+        ev.main(['--config', str(cfg_path), '--pilot-examples', str(pilot_path), '--mode', 'bge_dense'])
+
+
+def test_batch_encoding_dimension_mismatch_fails(tmp_path):
+    from scripts.evaluate_hybrid_linking import _encode_query_vectors
+    class BadEncoder:
+        def encode(self, texts): return [l2_normalize([1.0, 0.0]) for _ in texts]
+    with pytest.raises(ValueError, match='dimension mismatch'):
+        _encode_query_vectors(BadEncoder(), ['a','b','c'], batch_size=2, expected_dim=4)
+
+
+def test_rrf_weight_zero_supported_but_both_zero_rejected():
+    dev=[{'journal_note':'a','positive_code':'E11'}]
+    def bm(ex): return ['E11','I10','J45']
+    def de(ex): return ['J45','I10','E11']
+    params = tune_rrf(dev, bm, de, weights=(0.0, 1.0), ks=(10,))
+    assert (params['bm25_weight'], params['dense_weight']) != (0.0, 0.0)
+    assert params['bm25_weight'] in {0.0, 1.0}
+
+
+def test_hybrid_selected_on_dev_and_readiness_uses_test_only(tmp_path, monkeypatch):
+    from src.linking.dense import kb_checksum
+    from scripts import evaluate_hybrid_linking as ev
+    recs=records(); kb_dir, pilot_path = _write_kb_and_pilot(tmp_path, recs)
+    checksum = kb_checksum([kb_dir / 'icd10.jsonl'])
+    dense_dir = tmp_path/'dense'
+    manifest={'model_name':'test-model','model_revision':'r1','kb_checksum':checksum,'normalization':'l2','include_unverified':True,'max_length':32,'dimension':4}
+    save_dense_index(DenseAliasIndex.build(recs, MockDenseEncoder(), include_unverified=True, manifest=manifest), dense_dir, manifest)
+    cfg={'kb_dir':str(kb_dir),'dense_index_dir':str(dense_dir),'include_unverified':True,'mode':'hybrid_rrf','model_name':'test-model','model_revision':'r1','max_length':32,'batch_size':2}
+    cfg_path=tmp_path/'cfg.json'; cfg_path.write_text(json.dumps(cfg), encoding='utf-8')
+    class FakeBackend:
+        def __init__(self, **kwargs): self.device='cpu'; self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): return self.enc.encode(texts)
+    monkeypatch.setattr(ev, 'BGEM3Backend', FakeBackend)
+    out=ev.main(['--config',str(cfg_path),'--pilot-examples',str(pilot_path),'--mode','hybrid_rrf'])
+    assert 'selected_on_dev' in out
+    assert out['readiness'] in {'NOT_READY_FOR_RERANKER','READY_FOR_RERANKER'}
+    if out['splits']['test']['recall@10'] < 0.80:
+        assert out['readiness'] == 'NOT_READY_FOR_RERANKER'
