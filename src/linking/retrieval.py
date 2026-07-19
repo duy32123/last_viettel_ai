@@ -81,21 +81,38 @@ def kb_paths_checksum(paths):
     for p in sorted(Path(x) for x in paths): h[p.name]=file_sha256(p)
     return h
 
+def _record_payload(r: KBRecord):
+    return {'code':r.code,'canonical_name':r.canonical_name,'aliases':r.aliases,'terminology':r.terminology,'version':r.version,'source':r.source,'verified':r.verified,'metadata':r.metadata,'semantic_type':r.semantic_type,'language':r.language}
+
 def save_lexical_index(index: LexicalIndex, out_dir: Path, kb_paths=None, manifest_extra=None):
     out_dir.mkdir(parents=True, exist_ok=True)
-    manifest={'index_type':'lexical_bm25_inverted','build_seconds':index.build_seconds,'index_size':index.index_size,'kb_checksum':kb_paths_checksum(kb_paths or []),'peak_memory_bytes':None,'candidate_universe':len(index.records)}
+    manifest={'index_type':'lexical_bm25_inverted','schema_version':1,'build_seconds':index.build_seconds,'index_size':index.index_size,'kb_checksum':kb_paths_checksum(kb_paths or []),'peak_memory_bytes':None,'candidate_universe':len(index.records)}
     if manifest_extra: manifest.update(manifest_extra)
     (out_dir/'lexical_manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-    # Persist a compact postings summary; records remain in copied KB jsonl files.
+    payload={'records':[_record_payload(r) for r in index.records], 'names':[(i,n,dict(c)) for i,n,c in index.names], 'exact':{f'{k[0]}\t{k[1]}':v for k,v in index.exact.items()}, 'df':dict(index.df), 'postings':{f'{k[0]}\t{k[1]}':v for k,v in index.postings.items()}, 'index_size':index.index_size}
+    (out_dir/'lexical_index.json').write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
     (out_dir/'lexical_postings_summary.json').write_text(json.dumps(index.index_size, ensure_ascii=False, indent=2), encoding='utf-8')
     return manifest
 
-def load_lexical_index(kb_dir: Path, include_unverified=False, expected_kb_checksum:dict|None=None):
-    paths=sorted(Path(kb_dir).glob('*.jsonl')); checksum=kb_paths_checksum(paths)
+def load_lexical_index(kb_dir: Path, include_unverified=False, expected_kb_checksum:dict|None=None, index_dir:Path|None=None):
+    t0=time.time(); paths=sorted(Path(kb_dir).glob('*.jsonl')); checksum=kb_paths_checksum(paths)
     if expected_kb_checksum is not None and checksum != expected_kb_checksum: raise ValueError('stale lexical index cache')
-    records=[]
-    for p in paths: records.extend(read_jsonl(p))
-    return LexicalIndex(records, include_unverified=include_unverified)
+    idx_dir=Path(index_dir) if index_dir else Path(kb_dir)
+    manifest_path=idx_dir/'lexical_manifest.json'; payload_path=idx_dir/'lexical_index.json'
+    if not manifest_path.exists() or not payload_path.exists(): raise FileNotFoundError(f'persisted lexical index missing: {idx_dir}')
+    manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
+    if expected_kb_checksum is not None and manifest.get('kb_checksum') != expected_kb_checksum: raise ValueError('stale lexical index cache manifest')
+    if manifest.get('schema_version') != 1: raise ValueError('unsupported lexical index schema')
+    payload=json.loads(payload_path.read_text(encoding='utf-8'))
+    obj=LexicalIndex.__new__(LexicalIndex)
+    obj.records=[KBRecord(d['code'],d['canonical_name'],d.get('aliases',[]),d['terminology'],d['version'],d['source'],d.get('verified',False),d.get('metadata',{}),d.get('semantic_type',''),d.get('language','en')) for d in payload['records']]
+    if not include_unverified and any(not r.verified for r in obj.records): raise ValueError('persisted production lexical index contains unverified records')
+    obj.names=[(i,n,Counter(c)) for i,n,c in payload['names']]
+    obj.exact={tuple(k.split('\t',1)):v for k,v in payload['exact'].items()}
+    obj.df=Counter(payload['df'])
+    obj.postings=defaultdict(list, {tuple(k.split('\t',1)):v for k,v in payload['postings'].items()})
+    obj.index_size=payload.get('index_size', manifest.get('index_size',{})); obj.build_seconds=manifest.get('build_seconds',0); obj.loaded_from_cache=True; obj.index_load_seconds=time.time()-t0
+    return obj
 
 def report_records(records:list[KBRecord])->dict[str,Any]:
     by=Counter((r.terminology,r.version,r.source) for r in records); tty=Counter(r.metadata.get('TTY') for r in records if r.metadata.get('TTY'))

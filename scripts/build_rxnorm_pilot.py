@@ -55,7 +55,9 @@ def main(argv=None):
         sp=split_code(rec.code, ns.seed); code_split[rec.code]=sp
         for i,ex in enumerate(context_for(rec, ns.examples_per_code)):
             splits[sp].append({'id':f'{rec.code}:{i}', **ex, 'official_evaluation':False, 'synthetic_pilot':True})
-    leakage=len(code_split)-len(set(code_split))
+    split_sets={sp:{e['positive_code'] for e in rows} for sp,rows in splits.items()}
+    leakage=len((split_sets['train'] & split_sets['dev']) | (split_sets['train'] & split_sets['test']) | (split_sets['dev'] & split_sets['test']))
+    if leakage: raise ValueError('RxCUI split leakage detected')
     report={'records':len(records),'selected_codes':len(selected),'max_codes':ns.max_codes,'examples_per_code':ns.examples_per_code,'seed':ns.seed,'splits':{k:len(v) for k,v in splits.items()},'codes_by_split':dict(Counter(code_split.values())),'strata':dict(Counter(stratum(r) for r in selected)),'split_leakage':leakage,'official_evaluation':False,'synthetic_pilot':True,'exact_alias_diagnostic_excluded_from_main_metric':True}
     if ns.dry_run:
         print(json.dumps(report, indent=2)); return

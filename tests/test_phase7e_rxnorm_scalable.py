@@ -28,9 +28,9 @@ def test_lexical_index_persist_manifest_and_stale_cache(tmp_path):
     kb=tmp_path/'kb'; write_jsonl(kb/'rxnorm.jsonl', recs())
     idx=LexicalIndex(recs()); manifest=save_lexical_index(idx,tmp_path/'index',[kb/'rxnorm.jsonl'],{'production':True})
     assert manifest['candidate_universe']==4 and manifest['index_size']['postings']>0
-    assert load_lexical_index(kb, expected_kb_checksum=manifest['kb_checksum']).records
+    assert load_lexical_index(kb, expected_kb_checksum=manifest['kb_checksum'], index_dir=tmp_path/'index').records
     with pytest.raises(ValueError, match='stale'):
-        load_lexical_index(kb, expected_kb_checksum={'rxnorm.jsonl':'bad'})
+        load_lexical_index(kb, expected_kb_checksum={'rxnorm.jsonl':'bad'}, index_dir=tmp_path/'index')
 
 def test_deterministic_stratified_sampling_and_split_leakage_zero():
     from scripts.build_rxnorm_pilot import deterministic_sample, split_code, stratum, context_for
@@ -47,7 +47,8 @@ def test_exact_diagnostic_excluded_from_main_metric(tmp_path, capsys):
     kb=tmp_path/'kb'; write_jsonl(kb/'rxnorm.jsonl', recs())
     pilot=tmp_path/'pilot.json'
     build_rxnorm_pilot.main(['--kb-dir',str(kb),'--output',str(pilot),'--max-codes','4','--examples-per-code','5','--seed','5'])
-    cfg={'kb_dir':str(kb),'production':True,'include_unverified':False,'top_k':4}
+    idx_dir=tmp_path/'index'; save_lexical_index(LexicalIndex(recs()), idx_dir, [kb/'rxnorm.jsonl'])
+    cfg={'kb_dir':str(kb),'index_dir':str(idx_dir),'production':True,'include_unverified':False,'top_k':4}
     cfg_path=tmp_path/'cfg.json'; cfg_path.write_text(json.dumps(cfg))
     out=evaluate_rxnorm_linking.main(['--config',str(cfg_path),'--pilot-examples',str(pilot),'--mode','bm25','--max-eval-queries','2'])
     assert 'overall_main_excluding_exact_alias_diagnostic' in out
@@ -67,3 +68,80 @@ def test_candidate_membership_after_mock_rerank_unchanged():
     rows=[{'code':'1','canonical_name':'metformin','matched_alias':'metformin','score':1,'rank':1},{'code':'2','canonical_name':'Glucophage','matched_alias':'Glucophage','score':.5,'rank':2}]
     out=rerank_candidates('Glucophage', rows, MockReranker({('Glucophage','Glucophage'):2.0}))
     assert {r['code'] for r in out} == {'1','2'}
+
+
+def _runtime_fixture(tmp_path):
+    from src.linking.dense import DenseAliasIndex, MockDenseEncoder, save_dense_index, kb_checksum
+    kb=tmp_path/'kb'; write_jsonl(kb/'rxnorm.jsonl', recs())
+    idx_dir=tmp_path/'lex'; save_lexical_index(LexicalIndex(recs()), idx_dir, [kb/'rxnorm.jsonl'])
+    dense_dir=tmp_path/'dense'; paths=[kb/'rxnorm.jsonl']
+    manifest={'model_name':'test-dense','model_revision':'r1','kb_checksum':kb_checksum(paths),'normalization':'l2','include_unverified':False,'max_length':32,'dimension':4}
+    save_dense_index(DenseAliasIndex.build(recs(), MockDenseEncoder(dim=4), include_unverified=False, manifest=manifest), dense_dir, manifest)
+    pilot=tmp_path/'pilot.json'
+    from scripts import build_rxnorm_pilot
+    build_rxnorm_pilot.main(['--kb-dir',str(kb),'--output',str(pilot),'--max-codes','4','--examples-per-code','5','--seed','5'])
+    cfg={'kb_dir':str(kb),'index_dir':str(idx_dir),'dense_index_dir':str(dense_dir),'production':True,'include_unverified':False,'top_k':4,'model_name':'test-dense','model_revision':'r1','max_length':32,'batch_size':2,'reranker_batch_size':1,'reranker_model_name':'test-reranker'}
+    cfg_path=tmp_path/'cfg.json'; cfg_path.write_text(json.dumps(cfg))
+    return cfg_path,pilot
+
+
+def test_bge_dense_calls_dense_backend_and_missing_cache_fails(tmp_path, monkeypatch):
+    from scripts import evaluate_rxnorm_linking as ev
+    from src.linking.dense import MockDenseEncoder
+    cfg,pilot=_runtime_fixture(tmp_path); calls={'encode':0}
+    class SpyDense:
+        def __init__(self, **kw): self.device='cpu'; self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): calls['encode'] += 1; return self.enc.encode(texts)
+    monkeypatch.setattr(ev, 'BGEM3Backend', SpyDense)
+    out=ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','bge_dense'])
+    assert out['executed_backend']=='bge_dense' and out['dense_backend_called'] is True and calls['encode']>0
+    d=json.loads(cfg.read_text()); d['dense_index_dir']=str(tmp_path/'missing'); cfg.write_text(json.dumps(d))
+    with pytest.raises(FileNotFoundError): ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','bge_dense'])
+
+
+def test_hybrid_calls_bm25_and_dense_and_mock_invalid(tmp_path, monkeypatch):
+    from scripts import evaluate_rxnorm_linking as ev
+    from src.linking.dense import MockDenseEncoder
+    cfg,pilot=_runtime_fixture(tmp_path)
+    class SpyDense:
+        def __init__(self, **kw): self.device='cpu'; self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): return self.enc.encode(texts)
+    monkeypatch.setattr(ev, 'BGEM3Backend', SpyDense)
+    out=ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','hybrid_rrf'])
+    assert out['executed_backend']=='hybrid_rrf' and out['bm25_backend_called'] and out['dense_backend_called']
+    mock=ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','hybrid_rrf','--mock-dense'])
+    assert mock['readiness']=='INVALID_MOCK_RUN'
+
+
+def test_reranker_called_membership_safe_and_missing_backend_fails(tmp_path, monkeypatch):
+    from scripts import evaluate_rxnorm_linking as ev
+    from src.linking.dense import MockDenseEncoder, MockReranker
+    cfg,pilot=_runtime_fixture(tmp_path)
+    class SpyDense:
+        def __init__(self, **kw): self.device='cpu'; self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): return self.enc.encode(texts)
+    class SpyReranker(MockReranker):
+        def __init__(self,*a,**k): super().__init__(); self.device='cpu'
+    monkeypatch.setattr(ev, 'BGEM3Backend', SpyDense); monkeypatch.setattr(ev, 'BGERerankerBackend', SpyReranker)
+    out=ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','reranker'])
+    assert out['executed_backend']=='reranker' and out['reranker_backend_called'] is True
+    class FailReranker:
+        def __init__(self,*a,**k): raise RuntimeError('no model')
+    monkeypatch.setattr(ev, 'BGERerankerBackend', FailReranker)
+    with pytest.raises(RuntimeError, match='no model'):
+        ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','reranker'])
+
+
+def test_split_leakage_gate_and_production_excludes_unverified(tmp_path):
+    from scripts import evaluate_rxnorm_linking as ev
+    cfg,pilot=_runtime_fixture(tmp_path)
+    leaked={'train':[{'id':'1:a','positive_code':'1','task':'normalized_medication','context':'x','tty':'IN'}],'dev':[{'id':'1:b','positive_code':'1','task':'normalized_medication','context':'x','tty':'IN'}],'test':[]}
+    leak_path=tmp_path/'leak.json'; leak_path.write_text(json.dumps(leaked))
+    with pytest.raises(ValueError, match='split leakage'):
+        ev.main(['--config',str(cfg),'--pilot-examples',str(leak_path),'--mode','bm25'])
+    kb=tmp_path/'badkb'; write_jsonl(kb/'rxnorm.jsonl',[KBRecord('9','fake',[],'RxNorm','v','seed',False,{},'drug','en')])
+    idx=tmp_path/'badidx'; save_lexical_index(LexicalIndex([KBRecord('9','fake',[],'RxNorm','v','seed',False,{},'drug','en')], include_unverified=True), idx, [kb/'rxnorm.jsonl'])
+    badcfg={'kb_dir':str(kb),'index_dir':str(idx),'production':True,'include_unverified':False}
+    bad=tmp_path/'badcfg.json'; bad.write_text(json.dumps(badcfg))
+    with pytest.raises(ValueError, match='unverified'):
+        ev.main(['--config',str(bad),'--pilot-examples',str(pilot),'--mode','bm25'])
