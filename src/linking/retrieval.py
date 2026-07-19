@@ -1,9 +1,10 @@
 from __future__ import annotations
-import math, difflib
+import math, difflib, json, time, sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
-from src.data.kb_schema import KBRecord, read_jsonl, alias_collisions
+from pathlib import Path
+from src.data.kb_schema import KBRecord, read_jsonl, alias_collisions, file_sha256
 from .normalization import normalize_mention, normalize_text
 ROUTE={'CHẨN_ĐOÁN':'ICD-10','THUỐC':'RxNorm'}
 @dataclass
@@ -14,12 +15,14 @@ class Candidate:
 def _tokens(s): return [t for t in normalize_text(s, True).split() if t]
 class LexicalIndex:
     def __init__(self, records:list[KBRecord], include_unverified: bool=False):
-        self.records=[r for r in records if r.verified or include_unverified]; self.names=[]; self.exact={}; self.df=Counter()
+        t0=time.time(); self.records=[r for r in records if r.verified or include_unverified]; self.names=[]; self.exact={}; self.df=Counter(); self.postings=defaultdict(list); self.build_seconds=0.0
         for i,r in enumerate(self.records):
             for name in [r.canonical_name,*r.aliases]:
                 for n in {normalize_text(name), normalize_text(name, True)}:
                     self.exact.setdefault((r.terminology,n), []).append((i,name))
-                toks=set(_tokens(name)); self.df.update(toks); self.names.append((i,name,Counter(_tokens(name))))
+                dtok=Counter(_tokens(name)); toks=set(dtok); self.df.update(toks); self.names.append((i,name,dtok))
+                for tok in toks: self.postings[(r.terminology,tok)].append((i,name,dtok[tok]))
+        self.build_seconds=time.time()-t0; self.index_size={'records':len(self.records),'name_entries':len(self.names),'postings':sum(len(v) for v in self.postings.values()),'exact_keys':len(self.exact)}
     @classmethod
     def from_paths(cls, paths):
         recs=[]
@@ -38,14 +41,16 @@ class LexicalIndex:
             for idx,name in self.exact.get((term,q),[]): add(idx,1.0,'exact' if normalize_text(self.records[idx].canonical_name) == q else 'alias')
         if len(hits)<top_k:
             qtok=Counter(_tokens(nm['no_diacritic'] if term == 'RxNorm' and drug_features else nm['base_no_diacritic'])); N=max(1,len(self.records)); scores=[]
-            for idx,name,dtok in self.names:
-                r=self.records[idx]
-                if r.terminology!=term: continue
-                s=0.0
-                for tok,c in qtok.items():
-                    if tok in dtok: s += (math.log((N-self.df[tok]+0.5)/(self.df[tok]+0.5)+1) * dtok[tok])
-                if s>0: scores.append((s,idx))
-            for s,idx in sorted(scores, key=lambda x:(-x[0], self.records[x[1]].terminology,self.records[x[1]].code)): add(idx, min(0.89,s/(s+1)),'bm25')
+            acc={}
+            best_name={}
+            for tok,cnt in qtok.items():
+                idf=math.log((N-self.df[tok]+0.5)/(self.df[tok]+0.5)+1)
+                for idx,name,tf in self.postings.get((term,tok),[]):
+                    acc[idx]=acc.get(idx,0.0)+idf*tf
+                    best_name.setdefault(idx,name)
+            for idx,s in acc.items():
+                if s>0: scores.append((s,idx,best_name[idx]))
+            for s,idx,name in sorted(scores, key=lambda x:(-x[0], self.records[x[1]].terminology,self.records[x[1]].code)): add(idx, min(0.89,s/(s+1)),'bm25')
         if use_fuzzy and len(hits)<top_k:
             q=nm['base_no_diacritic']
             scores=[]
@@ -70,6 +75,40 @@ class LexicalIndex:
             c.rank=i; c.retrieval_method=c.match_method
         return rows
 
+
+def kb_paths_checksum(paths):
+    h={}
+    for p in sorted(Path(x) for x in paths): h[p.name]=file_sha256(p)
+    return h
+
+def save_lexical_index(index: LexicalIndex, out_dir: Path, kb_paths=None, manifest_extra=None):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest={'index_type':'lexical_bm25_inverted','build_seconds':index.build_seconds,'index_size':index.index_size,'kb_checksum':kb_paths_checksum(kb_paths or []),'peak_memory_bytes':None,'candidate_universe':len(index.records)}
+    if manifest_extra: manifest.update(manifest_extra)
+    (out_dir/'lexical_manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+    # Persist a compact postings summary; records remain in copied KB jsonl files.
+    (out_dir/'lexical_postings_summary.json').write_text(json.dumps(index.index_size, ensure_ascii=False, indent=2), encoding='utf-8')
+    return manifest
+
+def load_lexical_index(kb_dir: Path, include_unverified=False, expected_kb_checksum:dict|None=None):
+    paths=sorted(Path(kb_dir).glob('*.jsonl')); checksum=kb_paths_checksum(paths)
+    if expected_kb_checksum is not None and checksum != expected_kb_checksum: raise ValueError('stale lexical index cache')
+    records=[]
+    for p in paths: records.extend(read_jsonl(p))
+    return LexicalIndex(records, include_unverified=include_unverified)
+
 def report_records(records:list[KBRecord])->dict[str,Any]:
     by=Counter((r.terminology,r.version,r.source) for r in records); tty=Counter(r.metadata.get('TTY') for r in records if r.metadata.get('TTY'))
     return {'rows_by_terminology_version_source':{str(k):v for k,v in by.items()}, 'rows_by_tty':dict(tty), 'verified':sum(r.verified for r in records), 'unverified':sum(not r.verified for r in records), 'unique_codes':len({(r.terminology,r.version,r.code) for r in records}), 'alias_count':sum(len(r.aliases) for r in records), 'alias_collisions':alias_collisions(records), 'empty_canonical_names':sum(not r.canonical_name for r in records), 'duplicates':len(records)-len({(r.terminology,r.version,r.code) for r in records})}
+
+def expand_relationship_candidates(candidates:list[dict], records:list[KBRecord], enabled:bool=False, max_related:int=5)->list[dict]:
+    if not enabled: return candidates
+    by_code={r.code:r for r in records}; seen={c['code'] for c in candidates}; out=list(candidates)
+    for cand in candidates:
+        rec=by_code.get(cand['code'])
+        if not rec: continue
+        for rel in rec.metadata.get('relationships',[])[:max_related]:
+            code=rel.get('target_rxcui')
+            if not code or code in seen or code not in by_code: continue
+            r=by_code[code]; seen.add(code); out.append({'code':r.code,'terminology':r.terminology,'canonical_name':r.canonical_name,'score':0.0,'rank':len(out)+1,'retrieval_method':'rxnrel_expansion','matched_alias':r.canonical_name,'verified':r.verified,'source':r.source,'version':r.version,'tty':r.metadata.get('TTY'),'relationship_provenance':rel})
+    return out

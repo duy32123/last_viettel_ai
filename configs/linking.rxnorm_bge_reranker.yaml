@@ -16,5 +16,10 @@
   "reranker_max_length": 8192,
   "use_bge": true,
   "use_reranker": true,
-  "official_evaluation": false
+  "official_evaluation": false,
+  "relationship_expansion": false,
+  "pilot_default_max_codes": 800,
+  "pilot_default_examples_per_code": 4,
+  "pilot_seed": 13,
+  "fuzzy": false
 }
