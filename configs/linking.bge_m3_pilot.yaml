@@ -1,0 +1,16 @@
+{
+  "kb_dir": "data/processed/linking_kb_auxiliary",
+  "index_dir": "data/processed/linking_index_hf_auxiliary",
+  "dense_index_dir": "data/processed/linking_dense_bge_m3_auxiliary",
+  "production": false,
+  "include_unverified": true,
+  "top_k": 20,
+  "mode": "hybrid_rrf",
+  "model_name": "BAAI/bge-m3",
+  "model_revision": "main",
+  "batch_size": 16,
+  "max_length": 8192,
+  "use_bge": true,
+  "use_reranker": false,
+  "official_evaluation": false
+}
