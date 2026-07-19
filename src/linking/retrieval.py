@@ -82,16 +82,51 @@ def kb_paths_checksum(paths):
     return h
 
 def _record_payload(r: KBRecord):
-    return {'code':r.code,'canonical_name':r.canonical_name,'aliases':r.aliases,'terminology':r.terminology,'version':r.version,'source':r.source,'verified':r.verified,'metadata':r.metadata,'semantic_type':r.semantic_type,'language':r.language}
+    # Persist only retrieval-time projection fields. Do not duplicate large
+    # import metadata, relationships, checksums, or alias provenance in the
+    # lexical cache payload.
+    return {
+        'code': r.code,
+        'canonical_name': r.canonical_name,
+        'aliases': r.aliases,
+        'terminology': r.terminology,
+        'version': r.version,
+        'source': r.source,
+        'verified': r.verified,
+        'TTY': r.metadata.get('TTY'),
+        'specificity': r.metadata.get('specificity'),
+        'semantic_type': r.semantic_type,
+        'language': r.language,
+    }
+
+def _atomic_write_text(path: Path, text: str):
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(text, encoding='utf-8')
+    tmp.replace(path)
+
+def _assert_lean_payload(payload):
+    forbidden = {'relationships', 'alias_provenance'}
+    for rec in payload.get('records', []):
+        bad = forbidden & set(rec)
+        if bad:
+            raise ValueError(f'lexical payload contains forbidden keys: {sorted(bad)}')
+        if 'metadata' in rec:
+            raise ValueError('lexical payload must not persist full metadata')
 
 def save_lexical_index(index: LexicalIndex, out_dir: Path, kb_paths=None, manifest_extra=None):
     out_dir.mkdir(parents=True, exist_ok=True)
-    manifest={'index_type':'lexical_bm25_inverted','schema_version':1,'build_seconds':index.build_seconds,'index_size':index.index_size,'kb_checksum':kb_paths_checksum(kb_paths or []),'peak_memory_bytes':None,'candidate_universe':len(index.records)}
-    if manifest_extra: manifest.update(manifest_extra)
-    (out_dir/'lexical_manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+    kb_paths = kb_paths or []
+    source_kb_bytes = sum(Path(p).stat().st_size for p in kb_paths if Path(p).exists())
     payload={'records':[_record_payload(r) for r in index.records], 'names':[(i,n,dict(c)) for i,n,c in index.names], 'exact':{f'{k[0]}\t{k[1]}':v for k,v in index.exact.items()}, 'df':dict(index.df), 'postings':{f'{k[0]}\t{k[1]}':v for k,v in index.postings.items()}, 'index_size':index.index_size}
-    (out_dir/'lexical_index.json').write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
-    (out_dir/'lexical_postings_summary.json').write_text(json.dumps(index.index_size, ensure_ascii=False, indent=2), encoding='utf-8')
+    _assert_lean_payload(payload)
+    payload_text=json.dumps(payload, ensure_ascii=False)
+    payload_bytes=len(payload_text.encode('utf-8'))
+    manifest={'index_type':'lexical_bm25_inverted','schema_version':1,'build_seconds':index.build_seconds,'index_size':index.index_size,'kb_checksum':kb_paths_checksum(kb_paths),'peak_memory_bytes':None,'candidate_universe':len(index.records),'source_kb_bytes':source_kb_bytes,'lexical_payload_bytes':payload_bytes,'lexical_compression_ratio':(payload_bytes/source_kb_bytes if source_kb_bytes else None)}
+    if manifest_extra: manifest.update(manifest_extra)
+    _atomic_write_text(out_dir/'lexical_index.json', payload_text)
+    _atomic_write_text(out_dir/'lexical_postings_summary.json', json.dumps(index.index_size, ensure_ascii=False, indent=2))
+    # Publish the manifest last so interrupted builds cannot look valid.
+    _atomic_write_text(out_dir/'lexical_manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
     return manifest
 
 def load_lexical_index(kb_dir: Path, include_unverified=False, expected_kb_checksum:dict|None=None, index_dir:Path|None=None):
@@ -105,13 +140,18 @@ def load_lexical_index(kb_dir: Path, include_unverified=False, expected_kb_check
     if manifest.get('schema_version') != 1: raise ValueError('unsupported lexical index schema')
     payload=json.loads(payload_path.read_text(encoding='utf-8'))
     obj=LexicalIndex.__new__(LexicalIndex)
-    obj.records=[KBRecord(d['code'],d['canonical_name'],d.get('aliases',[]),d['terminology'],d['version'],d['source'],d.get('verified',False),d.get('metadata',{}),d.get('semantic_type',''),d.get('language','en')) for d in payload['records']]
+    _assert_lean_payload(payload)
+    obj.records=[]
+    for d in payload['records']:
+        metadata={'TTY': d.get('TTY'), 'specificity': d.get('specificity')}
+        obj.records.append(KBRecord(d['code'],d['canonical_name'],d.get('aliases',[]),d['terminology'],d['version'],d['source'],d.get('verified',False),metadata,d.get('semantic_type',''),d.get('language','en')))
     if not include_unverified and any(not r.verified for r in obj.records): raise ValueError('persisted production lexical index contains unverified records')
     obj.names=[(i,n,Counter(c)) for i,n,c in payload['names']]
     obj.exact={tuple(k.split('\t',1)):v for k,v in payload['exact'].items()}
     obj.df=Counter(payload['df'])
     obj.postings=defaultdict(list, {tuple(k.split('\t',1)):v for k,v in payload['postings'].items()})
     obj.index_size=payload.get('index_size', manifest.get('index_size',{})); obj.build_seconds=manifest.get('build_seconds',0); obj.loaded_from_cache=True; obj.index_load_seconds=time.time()-t0
+    obj.source_kb_bytes=manifest.get('source_kb_bytes'); obj.lexical_payload_bytes=manifest.get('lexical_payload_bytes'); obj.lexical_compression_ratio=manifest.get('lexical_compression_ratio')
     return obj
 
 def report_records(records:list[KBRecord])->dict[str,Any]:

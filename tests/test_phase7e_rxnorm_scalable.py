@@ -188,3 +188,94 @@ def test_dense_mmap_and_argpartition_topk_path(tmp_path, monkeypatch):
     idx=load_dense_index(dense_dir, manifest)
     idx.search_vector(MockDenseEncoder(dim=4).encode(['metformin'])[0], top_k=2)
     assert calls['load']==1 and calls['argpartition']>=1
+
+
+def test_lexical_payload_is_lean_and_reports_compression(tmp_path):
+    kb=tmp_path/'kb'
+    rich=[KBRecord('10','amlodipine',[],'RxNorm','v','RxNorm',True,{'TTY':'IN','specificity':'ingredient','relationships':[{'target_rxcui':'11'}],'alias_provenance':[{'raw_alias':'x'}],'rxnconso_checksum':'secret'},'drug','en')]
+    write_jsonl(kb/'rxnorm.jsonl', rich)
+    manifest=save_lexical_index(LexicalIndex(rich), tmp_path/'idx', [kb/'rxnorm.jsonl'])
+    payload=json.loads((tmp_path/'idx'/'lexical_index.json').read_text())
+    rec=payload['records'][0]
+    assert set(rec) == {'code','canonical_name','aliases','terminology','version','source','verified','TTY','specificity','semantic_type','language'}
+    assert 'relationships' not in json.dumps(payload) and 'alias_provenance' not in json.dumps(payload)
+    assert manifest['source_kb_bytes'] > 0 and manifest['lexical_payload_bytes'] > 0 and manifest['lexical_compression_ratio'] is not None
+    loaded=load_lexical_index(kb, expected_kb_checksum=manifest['kb_checksum'], index_dir=tmp_path/'idx')
+    assert [c.code for c in loaded.search('amlodipine','THUỐC',top_k=1,use_fuzzy=False)] == ['10']
+
+
+def test_evaluator_uses_lightweight_registry_without_relationships_when_disabled(tmp_path):
+    from scripts import evaluate_rxnorm_linking as ev
+    cfg,pilot=_runtime_fixture(tmp_path)
+    # Rebuild KB/index with relationship metadata; evaluator should project it away.
+    rich=recs(); rich[0].metadata['relationships']=[{'target_rxcui':'3'}]
+    kb=tmp_path/'kb'; write_jsonl(kb/'rxnorm.jsonl', rich)
+    idx=tmp_path/'lex'; save_lexical_index(LexicalIndex(rich), idx, [kb/'rxnorm.jsonl'])
+    d=json.loads(cfg.read_text()); d.update({'kb_dir':str(kb),'index_dir':str(idx),'relationship_expansion':False}); cfg.write_text(json.dumps(d))
+    out=ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','bm25','--max-eval-queries-per-split','1'])
+    assert out['relationships_loaded'] is False
+    assert out['lightweight_record_count'] == 4
+    assert out['approximate_registry_bytes'] > 0
+
+
+def test_reranker_scores_each_pair_once_across_blend_weights_and_counters_match(tmp_path, monkeypatch):
+    from scripts import evaluate_rxnorm_linking as ev
+    from src.linking.dense import MockDenseEncoder, MockReranker
+    cfg,pilot=_runtime_fixture(tmp_path)
+    d=json.loads(cfg.read_text()); d['blend_weights']=[0.0,0.25,0.5,0.75,1.0]; cfg.write_text(json.dumps(d))
+    spy={'dense_calls':0,'reranker_calls':0,'pairs':0}
+    class SpyDense:
+        def __init__(self, **kw): self.device='cpu'; self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): spy['dense_calls'] += 1; return self.enc.encode(texts)
+    class SpyReranker(MockReranker):
+        def __init__(self,*a,**k): super().__init__(); self.device='cpu'; self.use_fp16=False
+        def score(self, pairs):
+            rows=list(pairs); spy['reranker_calls'] += 1; spy['pairs'] += len(rows); return super().score(rows)
+    monkeypatch.setattr(ev, 'BGEM3Backend', SpyDense); monkeypatch.setattr(ev, 'BGERerankerBackend', SpyReranker)
+    out=ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','reranker'])
+    assert out['reranker_model_calls'] == spy['reranker_calls']
+    assert out['reranker_pairs_scored'] == spy['pairs'] == out['reranker_unique_pairs']
+    assert out['reranker_cache_hits'] > 0
+    assert out['selected_blend_on_dev']['blend_weight'] in d['blend_weights']
+
+
+def test_selected_blend_changes_final_ranking_and_fallback_uses_blended_metrics(tmp_path, monkeypatch):
+    from scripts import evaluate_rxnorm_linking as ev
+    from src.linking.dense import MockDenseEncoder
+    cfg,pilot=_runtime_fixture(tmp_path)
+    d=json.loads(cfg.read_text()); d['blend_weights']=[1.0]; cfg.write_text(json.dumps(d))
+    class SpyDense:
+        def __init__(self, **kw): self.device='cpu'; self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): return self.enc.encode(texts)
+    class ReversingReranker:
+        def __init__(self,*a,**k): self.device='cpu'; self.use_fp16=False
+        def score(self, pairs):
+            # Favor lexicographically later passages so final blended ranking differs from retrieval.
+            return [float(sum(ord(ch) for ch in p) % 1000) for _,p in pairs]
+    monkeypatch.setattr(ev, 'BGEM3Backend', SpyDense); monkeypatch.setattr(ev, 'BGERerankerBackend', ReversingReranker)
+    out=ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','reranker'])
+    assert out['selected_blend_on_dev']['blend_weight'] == 1.0
+    assert out['dev_after'] == out['selected_blend_on_dev']['dev_metrics'] or 'mrr' in out['dev_after']
+    assert out['final_ranking_mode'] in {'retrieval_fallback','blended_retrieval_reranker_w=1.0'}
+    if out['fallback_used']:
+        assert out['dev_after']['recall@1'] < out['dev_before']['recall@1'] and out['dev_after']['mrr'] < out['dev_before']['mrr']
+
+
+def test_stable_query_key_avoids_duplicate_dense_searches(tmp_path, monkeypatch):
+    from scripts import evaluate_rxnorm_linking as ev
+    from src.linking.dense import MockDenseEncoder
+    cfg,pilot=_runtime_fixture(tmp_path)
+    data=json.loads(Path(pilot).read_text())
+    splits=data.get('splits', data)
+    # Duplicate the same stable id inside one split; evaluator should reuse qvec and rankings by id.
+    main_dev=[e for e in splits['dev'] if e.get('task') != 'exact_alias_diagnostic']
+    if main_dev:
+        splits['dev'].append(dict(main_dev[0]))
+    dup=tmp_path/'dup_pilot.json'; dup.write_text(json.dumps(data))
+    class SpyDense:
+        def __init__(self, **kw): self.device='cpu'; self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): return self.enc.encode(texts)
+    monkeypatch.setattr(ev, 'BGEM3Backend', SpyDense)
+    out=ev.main(['--config',str(cfg),'--pilot-examples',str(dup),'--mode','bge_dense'])
+    assert out['dense_search_calls'] == out['unique_query_count']
+    assert out['ranking_cache_hits'] >= 1

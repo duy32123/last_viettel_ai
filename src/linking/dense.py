@@ -154,17 +154,25 @@ def validate_dense_manifest(manifest:dict, expected:dict):
     if manifest.get('normalization')!='l2': raise ValueError('dense cache normalization must be l2')
     return True
 
+def _atomic_write_text(path:Path, text:str):
+    tmp=path.with_name(path.name + '.tmp')
+    tmp.write_text(text, encoding='utf-8')
+    tmp.replace(path)
+
 def save_dense_index(index:DenseAliasIndex, out_dir:Path, manifest:dict):
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest={**manifest}
     manifest.setdefault('schema_version',1); manifest.setdefault('model_revision','main'); manifest.setdefault('encoder_backend','FlagEmbedding.BGEM3FlagModel'); manifest.setdefault('dtype','float32'); manifest.setdefault('normalization','l2'); manifest.setdefault('include_unverified',False); manifest.setdefault('max_length',8192); manifest.setdefault('batch_size',16); manifest.setdefault('candidate_universe',len({e.code for e in index.entries})); manifest.setdefault('mock_encoder',False); manifest.setdefault('dimension', index._dim())
 
     if np is not None:
-        np.save(out_dir/'embeddings.npy', index.matrix if index.matrix is not None else np.asarray(index.vectors, dtype='float32'))
+        tmp=out_dir/'embeddings.tmp.npy'
+        np.save(tmp, index.matrix if index.matrix is not None else np.asarray(index.vectors, dtype='float32'))
+        tmp.replace(out_dir/'embeddings.npy')
     else:
-        (out_dir/'embeddings.json').write_text(json.dumps(index.vectors), encoding='utf-8')
-    (out_dir/'alias_to_code.json').write_text(json.dumps([e.__dict__ for e in index.entries], ensure_ascii=False, indent=2), encoding='utf-8')
-    (out_dir/'dense_manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+        _atomic_write_text(out_dir/'embeddings.json', json.dumps(index.vectors))
+    _atomic_write_text(out_dir/'alias_to_code.json', json.dumps([e.__dict__ for e in index.entries], ensure_ascii=False, indent=2))
+    # Publish manifest last after vectors and mapping are complete.
+    _atomic_write_text(out_dir/'dense_manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
 
 def load_dense_index(out_dir:Path, expected:dict):
     if not (out_dir/'dense_manifest.json').exists(): raise FileNotFoundError(f'dense index missing: {out_dir}')
