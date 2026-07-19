@@ -1,0 +1,8 @@
+{
+  "output_dir": "/tmp/last_viettel_ai_linking/kb",
+  "production": false,
+  "sources": [
+    {"name":"test_icd10_fixture","kind":"icd_official","terminology":"ICD-10","version":"TEST-2026","path":"tests/fixtures/linking/icd10_fixture.csv","verified":true,"field_map":{"code":"code","title":"title","aliases":"aliases","parent":"parent","version":"version","language":"language"}},
+    {"name":"test_rxnorm_fixture","kind":"rxnorm_rrf","version":"TEST-2026","path":"tests/fixtures/linking/rxnorm_rrf","verified":true}
+  ]
+}
