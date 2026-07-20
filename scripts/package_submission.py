@@ -13,9 +13,11 @@ def main(argv=None):
     ns=p.parse_args(argv); report=validate(ns.input_dir, ns.output_dir, ns.expected_count, ns.rxnorm_kb)
     out=Path(ns.zip_path); tmp=out.with_suffix(out.suffix+'.tmp')
     files=sorted(Path(ns.output_dir).glob('*.json'), key=_sort_key)
+    stems='\n'.join(f.stem for f in files).encode('utf-8')
+    report['output_stem_checksum']=hashlib.sha256(stems).hexdigest(); report['zip_members']=[f.name for f in files]
     with zipfile.ZipFile(tmp,'w',compression=zipfile.ZIP_DEFLATED) as z:
         for f in files:
             if f.name.startswith('.') or '/' in f.name: raise ValueError(f'invalid zip member: {f.name}')
             info=zipfile.ZipInfo(f.name, date_time=(1980,1,1,0,0,0)); info.compress_type=zipfile.ZIP_DEFLATED; z.writestr(info, f.read_bytes())
-    tmp.replace(out); pkg={'zip_path':str(out),'sha256':sha256(out),**report}; (out.with_suffix(out.suffix+'.report.json')).write_text(json.dumps(pkg,indent=2),encoding='utf-8'); print(json.dumps(pkg, indent=2))
+    tmp.replace(out); pkg={'zip_path':str(out),'output_zip_sha256':sha256(out),**report}; (out.with_suffix(out.suffix+'.report.json')).write_text(json.dumps(pkg,indent=2),encoding='utf-8'); print(json.dumps(pkg, indent=2))
 if __name__=='__main__': main()

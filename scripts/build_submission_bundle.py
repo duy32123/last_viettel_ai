@@ -1,11 +1,11 @@
 from __future__ import annotations
-import argparse, json, shutil, tempfile, hashlib, os, subprocess, fnmatch
+import argparse, json, shutil, tempfile, hashlib, os, subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
 EXCLUDES = {'.git','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache','artifacts','outputs','checkpoints'}
 EXCLUDE_PREFIXES = ('data/processed', '.cache', 'wandb', 'mlruns')
-CODE_ITEMS = ['src','scripts','submission','configs','docs','requirements-linking.txt','requirements-linking-heavy.txt','run_pipeline.py','extract.py','dicts.py','README.md']
+CODE_ITEMS = ['src','scripts','submission','configs','docs','run_pipeline.py','extract.py','dicts.py','README.md','pyproject.toml','setup.cfg','pytest.ini']
 WEIGHTS = ('model.safetensors','pytorch_model.bin','tf_model.h5','model.onnx')
 TOKENIZER_HINTS = ('tokenizer.json','tokenizer.model','vocab.json','sentencepiece.bpe.model','spiece.model')
 
@@ -51,7 +51,19 @@ def _component_stats(path: Path, bundle_rel: str | None=None):
     files=_iter_files(path)
     return {'source_path':str(path),'bundle_path':bundle_rel,'file_count':len(files),'size_bytes':sum(p.stat().st_size for p in files),'sha256':sha256(path) if path.exists() and path.is_file() else None}
 
-def _copy_path(src: Path, dst: Path, *, dry=False):
+def _has_symlink(src: Path) -> bool:
+    if src.is_symlink(): return True
+    if not src.exists() or not src.is_dir(): return False
+    for p in src.rglob('*'):
+        rel=p.relative_to(src).as_posix()
+        if any(part in EXCLUDES for part in p.parts) or any(rel.startswith(x) for x in EXCLUDE_PREFIXES):
+            continue
+        if p.is_symlink(): return True
+    return False
+
+def _copy_path(src: Path, dst: Path, *, dry=False, allow_symlinks=False):
+    if _has_symlink(src) and not allow_symlinks:
+        raise ValueError(f'{src} contains symlinks; run scripts/materialize_hf_snapshot.py first or pass --materialize-symlinks')
     files=_iter_files(src)
     if dry:
         return {'path':str(src),'file_count':len(files),'size_bytes':sum(p.stat().st_size for p in files)}
@@ -72,9 +84,21 @@ def _validate_model_dir(path: Path, name: str):
 def _write_atomic(path: Path, text: str):
     tmp=path.with_name(path.name+'.tmp'); tmp.write_text(text, encoding='utf-8'); tmp.replace(path)
 
+def _rxnorm_candidate_universe(path: Path) -> int:
+    try:
+        from src.data.kb_schema import read_jsonl
+        codes=set()
+        for f in Path(path).glob('*.jsonl'):
+            for r in read_jsonl(f):
+                if r.verified: codes.add(r.code)
+        return len(codes) or 62099
+    except Exception:
+        return 62099
+
 def _copy_code(code_root: Path, dst: Path, dry=False):
     total={'path':str(dst),'file_count':0,'size_bytes':0}
-    for item in CODE_ITEMS:
+    items=list(CODE_ITEMS) + [p.name for p in sorted(code_root.glob('requirements*.txt'))]
+    for item in dict.fromkeys(items):
         src=code_root/item
         if not src.exists(): continue
         stat=_copy_path(src, dst/item, dry=dry)
@@ -90,7 +114,7 @@ def main(argv=None):
     p.add_argument('--code-root', required=True)
     for a in ['ner-model','assertion-model','rxnorm-kb','rxnorm-dense-index','bge-model','output']:
         p.add_argument('--'+a, required=True)
-    p.add_argument('--dry-run', action='store_true'); p.add_argument('--allow-dirty', action='store_true'); p.add_argument('--overwrite', action='store_true')
+    p.add_argument('--dry-run', action='store_true'); p.add_argument('--allow-dirty', action='store_true'); p.add_argument('--overwrite', action='store_true'); p.add_argument('--materialize-symlinks', action='store_true')
     ns=p.parse_args(argv); code_root=Path(ns.code_root).resolve(); out=Path(ns.output).resolve()
     sha=git_sha(code_root)
     dirty=worktree_dirty(code_root)
@@ -101,19 +125,28 @@ def main(argv=None):
     inventory={'dry_run':ns.dry_run,'code_git_sha':sha,'created_at':datetime.now(timezone.utc).isoformat(),'components':{}}
     if ns.dry_run:
         inventory['dirty']=dirty
-        inventory['components']['code']=_component_stats(code_root, rel['code'])
-        for k,v in mapping.items(): inventory['components'][k]=_component_stats(v, rel[k])
+        inventory['components']['code']=_copy_code(code_root, out/rel['code'], dry=True); inventory['components']['code']['bundle_path']=rel['code']; inventory['components']['code'].pop('path', None)
+        for k,v in mapping.items():
+            stat=_component_stats(v, rel[k]); stat.pop('source_path', None); inventory['components'][k]=stat
         print(json.dumps(inventory, ensure_ascii=False, indent=2)); return
     if out.exists() and not ns.overwrite:
         raise FileExistsError(f'output exists (use --overwrite): {out}')
+    for src in mapping.values():
+        if _has_symlink(src) and not ns.materialize_symlinks:
+            raise ValueError(f'{src} contains symlinks; run scripts/materialize_hf_snapshot.py first or pass --materialize-symlinks')
     _validate_model_dir(mapping['ner'], 'NER model')
     _validate_model_dir(mapping['assertion'], 'assertion model')
     _validate_model_dir(mapping['bge'], 'BGE model')
     staging=Path(tempfile.mkdtemp(prefix=out.name+'.staging.', dir=str(out.parent)))
     try:
         inventory['components']['code']=_copy_code(code_root, staging/rel['code'])
-        for k,src in mapping.items(): inventory['components'][k]=_copy_path(src, staging/rel[k])
-        manifest={'schema_version':1,'code_git_sha':sha,'created_at':inventory['created_at'],'official_evaluation':False,'ner':{'path':rel['ner'],**inventory['components']['ner']},'assertion':{'path':rel['assertion'],'thresholds':rel['assertion']+'/thresholds.json',**inventory['components']['assertion']},'rxnorm':{'path':rel['rxnorm'],'candidate_universe':62099,**inventory['components']['rxnorm']},'dense_index':{'path':rel['dense_index'],**inventory['components']['dense_index']},'bge':{'path':rel['bge'],'model_name':'BAAI/bge-m3','revision':'main',**inventory['components']['bge']},'include_unverified':False,'reranker_enabled':False,'low_vram_mode':True,'icd10':{'production_blocker':'official ICD-10 KB missing; diagnosis candidates suppressed'},'expected_schema':{'concept_keys':['text','type','position','assertions','candidates']}}
+        inventory['components']['code']['bundle_path']=rel['code']; inventory['components']['code'].pop('path', None)
+        for k,src in mapping.items():
+            stat=_copy_path(src, staging/rel[k], allow_symlinks=ns.materialize_symlinks)
+            inventory['components'][k]={'bundle_path':rel[k],'file_count':stat['file_count'],'size_bytes':stat['size_bytes']}
+        def comp(name): return {'path':rel[name], **inventory['components'][name]}
+        candidate_universe=_rxnorm_candidate_universe(mapping['rxnorm'])
+        manifest={'schema_version':1,'code_git_sha':sha,'created_at':inventory['created_at'],'official_evaluation':False,'ner':comp('ner'),'assertion':{**comp('assertion'),'thresholds':rel['assertion']+'/thresholds.json'},'rxnorm':{**comp('rxnorm'),'candidate_universe':candidate_universe},'dense_index':comp('dense_index'),'bge':{**comp('bge'),'model_name':'BAAI/bge-m3','revision':'main'},'include_unverified':False,'reranker_enabled':False,'low_vram_mode':True,'icd10':{'production_blocker':'official ICD-10 KB missing; diagnosis candidates suppressed'},'expected_schema':{'concept_keys':['text','type','position','assertions','candidates']}}
         _write_atomic(staging/'champion_manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
         inventory['total_size_bytes']=sum(p.stat().st_size for p in staging.rglob('*') if p.is_file())
         _write_atomic(staging/'artifact_inventory.json', json.dumps(inventory, ensure_ascii=False, indent=2))

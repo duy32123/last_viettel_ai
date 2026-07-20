@@ -133,7 +133,7 @@ class EndToEndPipeline:
         self._ner_tokenizer=AutoTokenizer.from_pretrained(ner['model_path'], use_fast=True, local_files_only=local_only)
         self._ner_model=AutoModelForTokenClassification.from_pretrained(ner['model_path'], torch_dtype=dtype, local_files_only=local_only)
         self._ner_model.to(device); self._ner_model.eval()
-        self.report['model_metadata']['ner']={'backend':'transformers_token_classification','model_path':_safe_model_ref(ner.get('model_path')),'model_class':self._ner_model.__class__.__name__,'tokenizer_class':self._ner_tokenizer.__class__.__name__,'device':device,'dtype':str(dtype).replace('torch.',''),'model_forward_calls':0,'chunks':0,'load_seconds':time.time()-t0,'inference_seconds':0.0,'mock':False}
+        self.report['model_metadata']['ner']={'backend':'transformers_token_classification','model_path':_safe_model_ref(ner.get('model_path')),'model_class':self._ner_model.__class__.__name__,'tokenizer_class':self._ner_tokenizer.__class__.__name__,'device':device,'dtype':str(dtype).replace('torch.',''),'model_forward_calls':0,'chunks':0,'load_seconds':time.time()-t0,'inference_seconds':0.0,'mock':False,'model_load_count':self.report['model_metadata'].get('ner',{}).get('model_load_count',0)+1}
     def _predict_ner(self, text: str) -> list[dict[str,Any]]:
         ner=self.cfg.get('ner',{})
         if ner.get('mock', False):
@@ -157,7 +157,7 @@ class EndToEndPipeline:
         self._assertion_model.to(device); self._assertion_model.eval()
         th_path=cfg.get('thresholds_path') or str(Path(cfg['model_path'])/'thresholds.json')
         self._assertion_thresholds=load_thresholds(th_path)
-        self.report['model_metadata']['assertion']={'backend':'transformers_sequence_classification','model_class':self._assertion_model.__class__.__name__,'tokenizer_class':self._assertion_tokenizer.__class__.__name__,'thresholds_path':th_path,'device':device,'dtype':str(dtype).replace('torch.',''),'model_forward_calls':0,'example_count':0,'load_seconds':time.time()-t0,'inference_seconds':0.0,'mock':False}
+        self.report['model_metadata']['assertion']={'backend':'transformers_sequence_classification','model_class':self._assertion_model.__class__.__name__,'tokenizer_class':self._assertion_tokenizer.__class__.__name__,'thresholds_path':th_path,'device':device,'dtype':str(dtype).replace('torch.',''),'model_forward_calls':0,'example_count':0,'load_seconds':time.time()-t0,'inference_seconds':0.0,'mock':False,'model_load_count':self.report['model_metadata'].get('assertion',{}).get('model_load_count',0)+1}
     def _predict_assertions(self, text: str, entities: list[dict[str,Any]]):
         cfg=self.cfg.get('assertion',{})
         if cfg.get('mock', False):
@@ -202,7 +202,7 @@ class EndToEndPipeline:
         model_ref=rx.get('bge_model_path') if self.cfg.get('submission_mode') else expected['model_name']
         if self.cfg.get('submission_mode') and not Path(model_ref).exists(): raise FileNotFoundError(f'local BGE model path missing: {model_ref}')
         self._rx_encoder=BGEM3Backend(model_name=model_ref, batch_size=expected['batch_size'], max_length=expected['max_length'], use_fp16=rx.get('use_fp16'), device=self.cfg.get('runtime',{}).get('device'))
-        self.report['model_metadata']['rxnorm']={'backend':'bge_dense','model_name':expected['model_name'],'model_revision':expected['model_revision'],'dense_cache_validation':'valid','dense_query_encode_calls':0,'dense_search_calls':0,'dense_query_encode_batches':0,'dense_query_vectors':0,'candidate_universe':expected['candidate_universe'],'include_unverified':False,'mock':False,'linking_load_seconds':0.0,'linking_inference_seconds':0.0}
+        self.report['model_metadata']['rxnorm']={'backend':'bge_dense','model_name':expected['model_name'],'model_revision':expected['model_revision'],'dense_cache_validation':'valid','dense_query_encode_calls':0,'dense_search_calls':0,'dense_query_encode_batches':0,'dense_query_vectors':0,'candidate_universe':expected['candidate_universe'],'include_unverified':False,'mock':False,'linking_load_seconds':0.0,'linking_inference_seconds':0.0,'model_load_count':self.report['model_metadata'].get('rxnorm',{}).get('model_load_count',0)+1}
         self.report['model_metadata']['rxnorm']['linking_load_seconds'] += time.time()-t0
     def _med_query_key(self, text: str, ent: dict[str,Any]):
         query=_med_retrieval_query(text, ent)
