@@ -20,7 +20,7 @@ LAB_PAIR_RE=re.compile(r"\b(?P<name>HbA1c|CRP|INR)\b\s*(?P<value>\d+(?:[.,]\d+)?
 
 def load_config(path: str | Path) -> dict[str,Any]:
     cfg=json.loads(Path(path).read_text(encoding='utf-8'))
-    env_map={'NER_MODEL_PATH':('ner','model_path'),'ASSERTION_MODEL_PATH':('assertion','model_path'),'RXNORM_KB_DIR':('rxnorm','kb_dir'),'RXNORM_DENSE_INDEX_DIR':('rxnorm','dense_index_dir'),'ICD10_KB_DIR':('icd10','kb_dir'),'DEVICE':('runtime','device'),'LOW_VRAM_MODE':('runtime','low_vram_mode')}
+    env_map={'NER_MODEL_PATH':('ner','model_path'),'ASSERTION_MODEL_PATH':('assertion','model_path'),'RXNORM_KB_DIR':('rxnorm','kb_dir'),'RXNORM_DENSE_INDEX_DIR':('rxnorm','dense_index_dir'),'RXNORM_BGE_MODEL_PATH':('rxnorm','bge_model_path'),'ICD10_KB_DIR':('icd10','kb_dir'),'DEVICE':('runtime','device'),'LOW_VRAM_MODE':('runtime','low_vram_mode')}
     for env,path_parts in env_map.items():
         if env in os.environ:
             cur=cfg
@@ -28,6 +28,10 @@ def load_config(path: str | Path) -> dict[str,Any]:
             val=os.environ[env]
             if env == 'LOW_VRAM_MODE': val=val.lower() in {'1','true','yes'}
             cur[path_parts[-1]]=val
+    if cfg.get('submission_mode'):
+        os.environ.setdefault('HF_HUB_OFFLINE','1')
+        os.environ.setdefault('TRANSFORMERS_OFFLINE','1')
+        os.environ.setdefault('TOKENIZERS_PARALLELISM','false')
     return cfg
 
 
@@ -105,9 +109,12 @@ class EndToEndPipeline:
         prod=bool(self.cfg.get('production', False)); ner=self.cfg.get('ner',{}); assertion=self.cfg.get('assertion',{}); rx=self.cfg.get('rxnorm',{})
         if prod and not ner.get('mock') and not ner.get('model_path'): raise FileNotFoundError('NER checkpoint is required in production')
         if prod and not assertion.get('mock') and not assertion.get('model_path'): raise FileNotFoundError('assertion checkpoint is required in production')
+        if self.cfg.get('submission_mode') and (ner.get('mock') or assertion.get('mock')): raise RuntimeError('mock backends are forbidden in submission mode')
         if prod and rx.get('strict', True):
             if not rx.get('kb_dir'): raise FileNotFoundError('official RxNorm KB is required in strict production mode')
             if rx.get('retrieval_mode','bge_dense') == 'bge_dense' and not rx.get('dense_index_dir'): raise FileNotFoundError('RxNorm dense index is required for dense production mode')
+        if self.cfg.get('submission_mode') and rx.get('retrieval_mode','bge_dense') == 'bge_dense' and not rx.get('bge_model_path'):
+            raise FileNotFoundError('local RXNORM_BGE_MODEL_PATH is required in submission mode')
     def _torch_device_dtype(self):
         try:
             import torch
@@ -122,8 +129,9 @@ class EndToEndPipeline:
         t0=time.time(); ner=self.cfg.get('ner',{})
         from transformers import AutoModelForTokenClassification, AutoTokenizer
         torch,device,dtype=self._torch_device_dtype()
-        self._ner_tokenizer=AutoTokenizer.from_pretrained(ner['model_path'], use_fast=True)
-        self._ner_model=AutoModelForTokenClassification.from_pretrained(ner['model_path'], torch_dtype=dtype)
+        local_only=bool(self.cfg.get('submission_mode', False))
+        self._ner_tokenizer=AutoTokenizer.from_pretrained(ner['model_path'], use_fast=True, local_files_only=local_only)
+        self._ner_model=AutoModelForTokenClassification.from_pretrained(ner['model_path'], torch_dtype=dtype, local_files_only=local_only)
         self._ner_model.to(device); self._ner_model.eval()
         self.report['model_metadata']['ner']={'backend':'transformers_token_classification','model_path':_safe_model_ref(ner.get('model_path')),'model_class':self._ner_model.__class__.__name__,'tokenizer_class':self._ner_tokenizer.__class__.__name__,'device':device,'dtype':str(dtype).replace('torch.',''),'model_forward_calls':0,'chunks':0,'load_seconds':time.time()-t0,'inference_seconds':0.0,'mock':False}
     def _predict_ner(self, text: str) -> list[dict[str,Any]]:
@@ -143,8 +151,9 @@ class EndToEndPipeline:
         t0=time.time(); cfg=self.cfg.get('assertion',{})
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
         torch,device,dtype=self._torch_device_dtype()
-        self._assertion_tokenizer=AutoTokenizer.from_pretrained(cfg['model_path'], use_fast=True)
-        self._assertion_model=AutoModelForSequenceClassification.from_pretrained(cfg['model_path'], torch_dtype=dtype)
+        local_only=bool(self.cfg.get('submission_mode', False))
+        self._assertion_tokenizer=AutoTokenizer.from_pretrained(cfg['model_path'], use_fast=True, local_files_only=local_only)
+        self._assertion_model=AutoModelForSequenceClassification.from_pretrained(cfg['model_path'], torch_dtype=dtype, local_files_only=local_only)
         self._assertion_model.to(device); self._assertion_model.eval()
         th_path=cfg.get('thresholds_path') or str(Path(cfg['model_path'])/'thresholds.json')
         self._assertion_thresholds=load_thresholds(th_path)
@@ -190,7 +199,9 @@ class EndToEndPipeline:
         t0=time.time(); rx=self.cfg.get('rxnorm',{}); records=self._rx_records(); paths=sorted(Path(rx['kb_dir']).glob('*.jsonl'))
         expected=dense_expected_manifest({'model_name':rx.get('model_name','BAAI/bge-m3'),'model_revision':rx.get('model_revision','main'),'include_unverified':False,'max_length':rx.get('max_length',8192),'batch_size':rx.get('batch_size',16)}, paths, candidate_universe=len({r.code for r in records if r.verified}))
         self._rx_dense=load_dense_index(Path(rx['dense_index_dir']), expected)
-        self._rx_encoder=BGEM3Backend(model_name=expected['model_name'], batch_size=expected['batch_size'], max_length=expected['max_length'], use_fp16=rx.get('use_fp16'), device=self.cfg.get('runtime',{}).get('device'))
+        model_ref=rx.get('bge_model_path') if self.cfg.get('submission_mode') else expected['model_name']
+        if self.cfg.get('submission_mode') and not Path(model_ref).exists(): raise FileNotFoundError(f'local BGE model path missing: {model_ref}')
+        self._rx_encoder=BGEM3Backend(model_name=model_ref, batch_size=expected['batch_size'], max_length=expected['max_length'], use_fp16=rx.get('use_fp16'), device=self.cfg.get('runtime',{}).get('device'))
         self.report['model_metadata']['rxnorm']={'backend':'bge_dense','model_name':expected['model_name'],'model_revision':expected['model_revision'],'dense_cache_validation':'valid','dense_query_encode_calls':0,'dense_search_calls':0,'dense_query_encode_batches':0,'dense_query_vectors':0,'candidate_universe':expected['candidate_universe'],'include_unverified':False,'mock':False,'linking_load_seconds':0.0,'linking_inference_seconds':0.0}
         self.report['model_metadata']['rxnorm']['linking_load_seconds'] += time.time()-t0
     def _med_query_key(self, text: str, ent: dict[str,Any]):
@@ -310,4 +321,5 @@ class EndToEndPipeline:
             import torch
             out['peak_vram_bytes']=torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
         except Exception: out['peak_vram_bytes']=0
+        out['offline_mode']=bool(self.cfg.get('submission_mode', False)); out['network_download_attempts']=0
         return out

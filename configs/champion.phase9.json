@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "code_git_sha": null,
+  "created_at": null,
+  "official_evaluation": false,
+  "ner": {"path": "models/ner_xlmr_large_phase5_v2_1", "required": true},
+  "assertion": {"path": "models/assertion_xlmr_base_v1", "thresholds": "models/assertion_xlmr_base_v1/thresholds.json", "required": true},
+  "rxnorm": {"path": "kb/rxnorm", "release": "2026-07-06", "candidate_universe": 62099, "verified_only": true},
+  "dense_index": {"path": "indexes/rxnorm_bge_m3", "dimension": 1024},
+  "bge": {"path": "models/bge-m3", "model_name": "BAAI/bge-m3", "revision": "main", "local_only": true},
+  "include_unverified": false,
+  "reranker_enabled": false,
+  "low_vram_mode": true,
+  "icd10": {"production_blocker": "official ICD-10 KB missing; diagnosis candidates suppressed", "auxiliary_icd_allowed_in_production": false},
+  "expected_schema": {"concept_keys": ["text", "type", "position", "assertions", "candidates"], "entity_types": ["TRIỆU_CHỨNG", "CHẨN_ĐOÁN", "THUỐC", "TÊN_XÉT_NGHIỆM", "KẾT_QUẢ_XÉT_NGHIỆM"], "assertion_order": ["isNegated", "isFamily", "isHistorical"]}
+}
