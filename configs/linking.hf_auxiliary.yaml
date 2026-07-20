@@ -1,0 +1,9 @@
+{
+  "kb_dir": "data/processed/linking_kb_auxiliary",
+  "index_dir": "data/processed/linking_index_hf_auxiliary",
+  "production": false,
+  "include_unverified": true,
+  "top_k": 10,
+  "use_bge": false,
+  "use_reranker": false
+}

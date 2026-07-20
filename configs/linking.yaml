@@ -1,0 +1,1 @@
+{"kb_dir":"data/processed/linking_kb","index_dir":"data/processed/linking_index","top_k":10,"production":true,"use_bge":false,"use_reranker":false}

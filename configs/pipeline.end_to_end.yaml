@@ -1,0 +1,41 @@
+{
+  "production": true,
+  "runtime": {
+    "device": "auto",
+    "low_vram_mode": false
+  },
+  "ner": {
+    "model_path": null,
+    "mock": false,
+    "max_length": 256,
+    "stride": 64
+  },
+  "assertion": {
+    "model_path": null,
+    "mock": false,
+    "thresholds_path": null
+  },
+  "rxnorm": {
+    "kb_dir": null,
+    "dense_index_dir": null,
+    "retrieval_mode": "bge_dense",
+    "include_unverified": false,
+    "strict": true,
+    "top_k": 10,
+    "use_reranker": false,
+    "model_name": "BAAI/bge-m3",
+    "model_revision": "main",
+    "batch_size": 16,
+    "max_length": 8192
+  },
+  "icd10": {
+    "kb_dir": null,
+    "include_unverified": false,
+    "require": false,
+    "top_k": 10
+  },
+  "diagnostics": {
+    "report_path": "artifacts/pipeline_run_report.json"
+  },
+  "official_evaluation": false
+}
