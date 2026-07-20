@@ -10,13 +10,13 @@ def test_validate_submission_schema_and_tamper_fail(tmp_path):
     out=tmp_path/'out'; out.mkdir()
     src=Path('tests/fixtures/pipeline/expected')
     for p in src.glob('*.json'): (out/p.name).write_text(p.read_text(encoding='utf-8'), encoding='utf-8')
-    report=validate('tests/fixtures/pipeline/input', out)
+    report=validate('tests/fixtures/pipeline/input', out, rxnorm_kb='tests/fixtures/pipeline/rxnorm_kb')
     assert report['valid'] is True and report['output_count']==2
     rows=json.loads((out/'sample.json').read_text())
     rows[0]['relations']=[]
     (out/'sample.json').write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
     with pytest.raises(ValueError, match='unsupported keys'):
-        validate('tests/fixtures/pipeline/input', out)
+        validate('tests/fixtures/pipeline/input', out, rxnorm_kb='tests/fixtures/pipeline/rxnorm_kb')
 
 
 def test_package_submission_zip_root_layout(tmp_path):
@@ -24,7 +24,7 @@ def test_package_submission_zip_root_layout(tmp_path):
     for p in Path('tests/fixtures/pipeline/expected').glob('*.json'):
         (out/p.name).write_text(p.read_text(encoding='utf-8'), encoding='utf-8')
     zpath=tmp_path/'submission.zip'
-    package_submission.main(['--input-dir','tests/fixtures/pipeline/input','--output-dir',str(out),'--zip-path',str(zpath),'--expected-count','2'])
+    package_submission.main(['--input-dir','tests/fixtures/pipeline/input','--output-dir',str(out),'--zip-path',str(zpath),'--expected-count','2','--rxnorm-kb','tests/fixtures/pipeline/rxnorm_kb'])
     with zipfile.ZipFile(zpath) as z:
         names=z.namelist()
     assert names == sorted(p.name for p in out.glob('*.json'))

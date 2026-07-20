@@ -24,6 +24,7 @@ The bundle must contain only local model snapshots, tokenizer/config files, asse
 
 ```bash
 python scripts/build_submission_bundle.py \
+  --code-root . \
   --ner-model /path/to/ner_xlmr_large_phase5_v2_1 \
   --assertion-model /path/to/assertion_xlmr_base_v1 \
   --rxnorm-kb /path/to/rxnorm_kb \
@@ -83,6 +84,7 @@ The validator enforces exact offsets, deterministic sorting, allowed keys only (
 python scripts/package_submission.py \
   --input-dir /path/to/private/input \
   --output-dir /path/to/output \
+  --rxnorm-kb /path/to/bundle/kb/rxnorm \
   --zip-path /path/to/output.zip \
   --expected-count 100
 ```
