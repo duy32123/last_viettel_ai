@@ -170,3 +170,72 @@ def test_production_runtime_verified_requires_real_counters(tmp_path, monkeypatc
     c['ner']['mock']=True
     pipe=e2e.EndToEndPipeline(c); pipe.infer_document('Người bệnh dùng metformin 500 mg.')
     assert pipe.serializable_report()['production_runtime_verified'] is False
+
+
+def test_drug_assertions_are_serialized_for_negated_and_historical_medications():
+    pipe=EndToEndPipeline(cfg())
+    out=pipe.infer_document('Không dùng metformin. Trước đây đã dùng amlodipine.')
+    meds={r['text']:r for r in out if r['type']=='THUỐC'}
+    assert meds['metformin']['assertions'] == ['isNegated']
+    assert meds['amlodipine']['assertions'] == ['isHistorical']
+
+
+def test_lab_entities_excluded_from_assertion_model_and_identity_preserved(monkeypatch):
+    import src.pipeline.end_to_end as e2e
+    c=cfg(); c['ner']={'mock':True}; c['assertion']={'mock':False,'model_path':'assert','thresholds_path':'thresholds'}
+    seen=[]
+    def fake_load(self):
+        self._assertion_model='M'; self._assertion_tokenizer='T'; self._assertion_thresholds={}; self.report['model_metadata']['assertion']={'backend':'test','mock':False,'model_forward_calls':0,'example_count':0,'inference_seconds':0.0}
+    def fake_predict(text, entities, **kw):
+        seen.extend((e['text'], e['type'], tuple(e['position'])) for e in entities)
+        return [{**e,'assertions':['isNegated']} for e in entities]
+    monkeypatch.setattr(e2e.EndToEndPipeline, '_load_assertion', fake_load)
+    monkeypatch.setattr(e2e, 'predict_assertions', fake_predict)
+    text='Không ghi nhận đau ngực. Xét nghiệm HbA1c 8.1%.'
+    out=e2e.EndToEndPipeline(c).infer_document(text)
+    assert all(t not in {'TÊN_XÉT_NGHIỆM','KẾT_QUẢ_XÉT_NGHIỆM'} for _,t,_ in seen)
+    assert ('đau ngực','TRIỆU_CHỨNG',(15,23)) in seen
+    assert any(r['text']=='HbA1c' and 'assertions' not in r for r in out)
+    assert all(text[r['position'][0]:r['position'][1]] == r['text'] for r in out)
+
+
+def test_repeated_medications_encode_one_unique_dense_query(tmp_path, monkeypatch):
+    import src.pipeline.end_to_end as e2e
+    from src.linking.dense import MockDenseEncoder
+    c=_dense_pipeline_cfg(tmp_path); c['ner']={'mock':False,'model_path':'ner'}; c['assertion']={'mock':True}
+    text=' '.join(['metformin.']*10)
+    spans=[]; start=0
+    for _ in range(10):
+        spans.append({'text':'metformin','type':'THUỐC','start':start,'end':start+9,'score':1.0}); start += len('metformin. ')
+    monkeypatch.setattr(e2e.EndToEndPipeline, '_load_ner', lambda self: (setattr(self,'_ner_model',object()), setattr(self,'_ner_tokenizer',object()), self.report['model_metadata'].setdefault('ner',{'backend':'test','mock':False,'model_forward_calls':0,'chunks':0,'inference_seconds':0.0})))
+    monkeypatch.setattr(e2e, 'predict_with_model', lambda *a, **k: spans)
+    calls={'encode':0,'queries':[]}
+    class SpyBGE:
+        def __init__(self, **kw): self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): calls['encode'] += 1; calls['queries'].extend(texts); return self.enc.encode(texts)
+    monkeypatch.setattr(e2e, 'BGEM3Backend', SpyBGE)
+    pipe=e2e.EndToEndPipeline(c); out=pipe.infer_document(text); report=pipe.serializable_report(); meta=report['model_metadata']['rxnorm']
+    assert len([r for r in out if r['type']=='THUỐC']) == 10
+    assert calls['encode'] == 1 and calls['queries'] == ['metformin']
+    assert meta['dense_query_encode_batches'] == 1 and meta['dense_query_vectors'] == 1 and meta['dense_search_calls'] == 1
+    assert report['medication_entity_count'] == 10 and report['unique_medication_query_count'] == 1 and report['candidate_cache_hits'] >= 9
+
+
+def test_strength_context_changes_dense_query_key_and_mapping(tmp_path, monkeypatch):
+    import src.pipeline.end_to_end as e2e
+    from src.linking.dense import MockDenseEncoder
+    c=_dense_pipeline_cfg(tmp_path); c['ner']={'mock':False,'model_path':'ner'}; c['assertion']={'mock':True}
+    text='Dùng metformin 500 mg đường uống. Dùng metformin 1000 mg đường uống.'
+    spans=[{'text':'metformin','type':'THUỐC','start':5,'end':14,'score':1.0},{'text':'metformin','type':'THUỐC','start':39,'end':48,'score':1.0}]
+    monkeypatch.setattr(e2e.EndToEndPipeline, '_load_ner', lambda self: (setattr(self,'_ner_model',object()), setattr(self,'_ner_tokenizer',object()), self.report['model_metadata'].setdefault('ner',{'backend':'test','mock':False,'model_forward_calls':0,'chunks':0,'inference_seconds':0.0})))
+    monkeypatch.setattr(e2e, 'predict_with_model', lambda *a, **k: spans)
+    calls=[]
+    class SpyBGE:
+        def __init__(self, **kw): self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): calls.extend(texts); return self.enc.encode(texts)
+    monkeypatch.setattr(e2e, 'BGEM3Backend', SpyBGE)
+    out=e2e.EndToEndPipeline(c).infer_document(text)
+    assert calls == ['metformin 500 mg đường uống', 'metformin 1000 mg đường uống']
+    assert [r['text'] for r in out if r['type']=='THUỐC'] == ['metformin','metformin']
+    assert all(text[r['position'][0]:r['position'][1]] == r['text'] for r in out)
+    assert all(r['candidates'] == ['6809'] for r in out if r['type']=='THUỐC')

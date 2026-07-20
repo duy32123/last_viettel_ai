@@ -7,14 +7,14 @@ from typing import Any
 from extract import extract_concepts
 from src.data.kb_schema import read_jsonl
 from src.linking.dense import BGEM3Backend, dense_expected_manifest, load_dense_index
-from src.linking.normalization import normalize_mention
+from src.linking.normalization import normalize_mention, normalize_text
 from src.linking.retrieval import LexicalIndex, kb_paths_checksum, load_lexical_index
 from src.models.assertion.inference import load_thresholds, predict_assertions
 from src.models.ner.inference import finalize_predictions, predict_with_model
 
 ALLOWED_KEYS=("text","type","position","assertions","candidates")
 ASSERTION_ORDER=("isNegated","isFamily","isHistorical")
-ASSERTION_TYPES={"TRIỆU_CHỨNG","CHẨN_ĐOÁN"}
+ASSERTION_TYPES={"TRIỆU_CHỨNG","CHẨN_ĐOÁN","THUỐC"}
 LAB_PAIR_RE=re.compile(r"\b(?P<name>HbA1c|CRP|INR)\b\s*(?P<value>\d+(?:[.,]\d+)?\s*(?:%|mg/L|mg/dL)?)", re.I)
 
 
@@ -73,10 +73,31 @@ def _rule_ner(text: str) -> list[dict[str,Any]]:
     return rows
 
 
+_CLAUSE_BOUNDARY_RE=re.compile(r'[\r\n.;!?]')
+
+def _clause_bounds(text: str, start: int, end: int, window: int=96) -> tuple[int,int]:
+    left=max(0, start-window)
+    for m in _CLAUSE_BOUNDARY_RE.finditer(text, max(0,start-window), start): left=m.end()
+    right=min(len(text), end+window)
+    m=_CLAUSE_BOUNDARY_RE.search(text, end, min(len(text), end+window))
+    if m: right=m.start()
+    return left,right
+
+def _med_retrieval_query(text: str, ent: dict[str,Any]) -> str:
+    s,e=ent['position']; left,right=_clause_bounds(text, s, e)
+    clause=text[left:right]
+    # Keep entity surface exact and add only same-clause bounded dose/form/route context.
+    local_start=s-left; local_end=e-left
+    suffix=clause[local_end:local_end+64]
+    cue=re.match(r'(?P<ctx>\s*(?:\d+(?:[.,]\d+)?\s*(?:mg|g|mcg|ml|IU|%)|đường uống|uống|tiêm|truyền|viên|ống|tablet|capsule|oral|inj|injection|xr|er|sr|ir|\s|/|-)+)', suffix, re.I)
+    ctx=(cue.group('ctx') if cue else '').strip()
+    return (ent['text'] + (' ' + ctx if ctx else '')).strip()
+
+
 class EndToEndPipeline:
     def __init__(self, cfg: dict[str,Any]):
         self.cfg=cfg
-        self.report={'documents':0,'entities_by_type':Counter(),'assertions_by_label':Counter(),'invalid_offsets':0,'dropped_spans':0,'rxnorm_linking_coverage':0.0,'icd_linking_coverage':0.0,'verified_candidate_count':0,'unverified_candidate_count':0,'candidate_cache_hits':0,'latency':Counter(),'model_metadata':{},'kb':{},'official_production_blockers':[],'executed_backends':[],'low_vram_mode_executed':False,'stage_release_events':[],'official_evaluation':False,'production_runtime_verified':False}
+        self.report={'documents':0,'entities_by_type':Counter(),'assertions_by_label':Counter(),'invalid_offsets':0,'dropped_spans':0,'rxnorm_linking_coverage':0.0,'icd_linking_coverage':0.0,'verified_candidate_count':0,'unverified_candidate_count':0,'candidate_cache_hits':0,'medication_entity_count':0,'unique_medication_query_count':0,'latency':Counter(),'model_metadata':{},'kb':{},'official_production_blockers':[],'executed_backends':[],'low_vram_mode_executed':False,'stage_release_events':[],'official_evaluation':False,'production_runtime_verified':False}
         self._ner_model=None; self._ner_tokenizer=None; self._assertion_model=None; self._assertion_tokenizer=None; self._assertion_thresholds=None
         self._rx_index=None; self._rx_dense=None; self._rx_encoder=None; self._rx_cache={}; self._icd_records=None
         self._validate_artifacts()
@@ -166,30 +187,59 @@ class EndToEndPipeline:
         records=self._rx_records(); self._rx_index=LexicalIndex(records, include_unverified=False) if records else False; return self._rx_index
     def _load_rx_dense(self):
         if self._rx_dense is not None: return
-        rx=self.cfg.get('rxnorm',{}); records=self._rx_records(); paths=sorted(Path(rx['kb_dir']).glob('*.jsonl'))
+        t0=time.time(); rx=self.cfg.get('rxnorm',{}); records=self._rx_records(); paths=sorted(Path(rx['kb_dir']).glob('*.jsonl'))
         expected=dense_expected_manifest({'model_name':rx.get('model_name','BAAI/bge-m3'),'model_revision':rx.get('model_revision','main'),'include_unverified':False,'max_length':rx.get('max_length',8192),'batch_size':rx.get('batch_size',16)}, paths, candidate_universe=len({r.code for r in records if r.verified}))
         self._rx_dense=load_dense_index(Path(rx['dense_index_dir']), expected)
         self._rx_encoder=BGEM3Backend(model_name=expected['model_name'], batch_size=expected['batch_size'], max_length=expected['max_length'], use_fp16=rx.get('use_fp16'), device=self.cfg.get('runtime',{}).get('device'))
-        self.report['model_metadata']['rxnorm']={'backend':'bge_dense','model_name':expected['model_name'],'model_revision':expected['model_revision'],'dense_cache_validation':'valid','dense_query_encode_calls':0,'dense_search_calls':0,'candidate_universe':expected['candidate_universe'],'include_unverified':False,'mock':False}
-    def _med_query_key(self, ent):
-        nm=normalize_mention(ent['text'], 'THUỐC'); return (nm.get('base_no_diacritic') or nm.get('normalized') or ent['text']).casefold()
-    def _link_med(self, ent: dict[str,Any], text: str) -> list[str]:
-        rx=self.cfg.get('rxnorm',{}); mode=rx.get('retrieval_mode','bge_dense'); key=self._med_query_key(ent)
-        if key in self._rx_cache: self.report['candidate_cache_hits'] += 1; return list(self._rx_cache[key])
+        self.report['model_metadata']['rxnorm']={'backend':'bge_dense','model_name':expected['model_name'],'model_revision':expected['model_revision'],'dense_cache_validation':'valid','dense_query_encode_calls':0,'dense_search_calls':0,'dense_query_encode_batches':0,'dense_query_vectors':0,'candidate_universe':expected['candidate_universe'],'include_unverified':False,'mock':False,'linking_load_seconds':0.0,'linking_inference_seconds':0.0}
+        self.report['model_metadata']['rxnorm']['linking_load_seconds'] += time.time()-t0
+    def _med_query_key(self, text: str, ent: dict[str,Any]):
+        query=_med_retrieval_query(text, ent)
+        nm=normalize_mention(query, 'THUỐC')
+        base=(nm.get('base_no_diacritic') or nm.get('normalized') or ent['text']).casefold()
+        context_key=normalize_text(query, no_diacritic=True)
+        return f'{base}||{context_key}', query
+    def _precompute_med_links(self, texts: list[str], docs: list[list[dict[str,Any]]]):
+        meds=[]
+        for doc_i,(text,ents) in enumerate(zip(texts, docs)):
+            for ent in ents:
+                if ent.get('type') == 'THUỐC': meds.append((doc_i,text,ent,*self._med_query_key(text, ent)))
+        self.report['medication_entity_count'] += len(meds)
+        unseen=[]; seen=set()
+        for item in meds:
+            key=item[3]
+            if key in self._rx_cache: self.report['candidate_cache_hits'] += 1
+            elif key not in seen: seen.add(key); unseen.append(item)
+            else: self.report['candidate_cache_hits'] += 1
+        self.report['unique_medication_query_count'] += len(seen)
+        if not unseen: return
+        rx=self.cfg.get('rxnorm',{}); mode=rx.get('retrieval_mode','bge_dense')
         if mode == 'bge_dense':
-            self._load_rx_dense(); meta=self.report['model_metadata']['rxnorm']; qvec=self._rx_encoder.encode([ent['text']])[0]; meta['dense_query_encode_calls'] += 1; rows=self._rx_dense.search_vector(qvec, top_k=int(rx.get('top_k',10))); meta['dense_search_calls'] += 1
+            self._load_rx_dense(); meta=self.report['model_metadata']['rxnorm']; bs=max(1,int(rx.get('batch_size',16))); t0=time.time()
+            for start in range(0, len(unseen), bs):
+                batch=unseen[start:start+bs]; queries=[it[4] for it in batch]
+                vecs=self._rx_encoder.encode(queries); meta['dense_query_encode_calls'] += 1; meta['dense_query_encode_batches'] += 1; meta['dense_query_vectors'] += len(vecs)
+                for item,qvec in zip(batch, vecs):
+                    rows=self._rx_dense.search_vector(qvec, top_k=int(rx.get('top_k',10))); meta['dense_search_calls'] += 1; codes=[]
+                    for r in rows:
+                        if r.get('verified') and r['code'] not in codes: codes.append(r['code'])
+                    self._rx_cache[item[3]]=codes
+            meta['linking_inference_seconds'] += time.time()-t0
             if 'rxnorm:bge_dense' not in self.report['executed_backends']: self.report['executed_backends'].append('rxnorm:bge_dense')
-            codes=[]
-            for r in rows:
-                if r.get('verified') and r['code'] not in codes: codes.append(r['code'])
         elif mode in {'bm25','lexical_smoke'}:
-            idx=self._load_rx_lexical(); rows=idx.search(ent['text'], 'THUỐC', top_k=int(rx.get('top_k',5)), use_fuzzy=False) if idx else []
+            idx=self._load_rx_lexical(); t0=time.time()
+            for item in unseen:
+                rows=idx.search(item[4], 'THUỐC', top_k=int(rx.get('top_k',5)), use_fuzzy=False) if idx else []; codes=[]
+                for c in rows:
+                    if c.verified and c.code not in codes: codes.append(c.code)
+                self._rx_cache[item[3]]=codes
+            self.report['latency']['linking_inference_seconds'] += time.time()-t0
             if 'rxnorm:bm25' not in self.report['executed_backends']: self.report['executed_backends'].append('rxnorm:bm25')
-            codes=[]
-            for c in rows:
-                if c.verified and c.code not in codes: codes.append(c.code)
         else: raise ValueError(f'unsupported RxNorm retrieval_mode: {mode}')
-        self._rx_cache[key]=codes; return codes
+    def _link_med(self, ent: dict[str,Any], text: str) -> list[str]:
+        key,_=self._med_query_key(text, ent)
+        if key not in self._rx_cache: self._precompute_med_links([text], [[ent]])
+        return list(self._rx_cache.get(key, []))
     def _load_icd_records(self):
         if self._icd_records is not None: return self._icd_records
         icd=self.cfg.get('icd10',{}); kb_dir=Path(icd.get('kb_dir','')) if icd.get('kb_dir') else None
@@ -233,8 +283,16 @@ class EndToEndPipeline:
         deduped=[]
         for text,spans in zip(texts, span_docs):
             entities,dropped,dupes=_dedupe_entities(text, spans); self.report['dropped_spans'] += dropped + dupes; self.report['invalid_offsets'] += dropped; deduped.append(entities)
-        t=time.time(); asserted=[self._predict_assertions(text, [{k:v for k,v in e.items() if k in {'text','type','position'}} for e in ents]) for text,ents in zip(texts,deduped)]; self.report['latency']['assertion'] += time.time()-t; self._release_stage('assertion')
-        t=time.time(); final=[self._finalize_one(text, ents) for text,ents in zip(texts, asserted)]; self.report['latency']['linking'] += time.time()-t; self._release_stage('rxnorm')
+        t=time.time(); asserted=[]
+        for text,ents in zip(texts,deduped):
+            eligible=[{k:v for k,v in e.items() if k in {'text','type','position'}} for e in ents if e.get('type') in ASSERTION_TYPES]
+            pred_by_pos={tuple(e['position']):e for e in self._predict_assertions(text, eligible)}
+            merged=[]
+            for e in ents:
+                merged.append(pred_by_pos.get(tuple(e['position']), e))
+            asserted.append(merged)
+        self.report['latency']['assertion'] += time.time()-t; self._release_stage('assertion')
+        t=time.time(); self._precompute_med_links(texts, asserted); final=[self._finalize_one(text, ents) for text,ents in zip(texts, asserted)]; self.report['latency']['linking'] += time.time()-t; self._release_stage('rxnorm')
         self.report['documents'] += len(texts); self._update_runtime_verified()
         return final
     def _update_runtime_verified(self):
