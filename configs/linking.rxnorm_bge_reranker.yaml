@@ -12,8 +12,8 @@
   "max_length": 8192,
   "reranker_model_name": "BAAI/bge-reranker-v2-m3",
   "reranker_model_revision": "main",
-  "reranker_batch_size": 16,
-  "reranker_max_length": 8192,
+  "reranker_batch_size": 8,
+  "reranker_max_length": 512,
   "use_bge": true,
   "use_reranker": true,
   "official_evaluation": false,
@@ -22,5 +22,12 @@
   "pilot_default_examples_per_code": 4,
   "pilot_seed": 13,
   "fuzzy": false,
-  "retrieval_depth": 100
+  "retrieval_depth": 100,
+  "reranker": {
+    "backend": "transformers",
+    "model_name": "BAAI/bge-reranker-v2-m3",
+    "revision": "main",
+    "batch_size": 8,
+    "max_length": 512
+  }
 }

@@ -48,8 +48,58 @@ class MockDenseEncoder:
 BGE_RERANKER_MODEL='BAAI/bge-reranker-v2-m3'
 
 class BGERerankerBackend:
-    def __init__(self, model_name=BGE_RERANKER_MODEL, batch_size=16, max_length=8192, use_fp16=None, device=None):
-        self.model_name=model_name; self.batch_size=batch_size; self.max_length=max_length; self.use_fp16=use_fp16; self.device=device; self.model=None
+    """Direct Transformers backend for BAAI/bge-reranker-v2-m3.
+
+    This avoids the FlagEmbedding AbsReranker tokenizer.prepare_for_model path
+    that is incompatible with some current Transformers tokenizers. Models are
+    loaded lazily on first score() call, never at import time.
+    """
+    backend='transformers'
+    def __init__(self, model_name=BGE_RERANKER_MODEL, batch_size=8, max_length=512, use_fp16=None, device=None, revision='main'):
+        self.model_name=model_name; self.batch_size=batch_size; self.max_length=max_length; self.use_fp16=use_fp16; self.device=device; self.revision=revision
+        self.model=None; self.tokenizer=None; self.dtype=None; self.tokenizer_class=None; self.tokenizer_is_fast=None; self.model_class=None; self.transformers_version=None
+    def load(self):
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        import transformers
+        import torch
+        cuda=bool(torch.cuda.is_available())
+        resolved_device=self.device or ('cuda' if cuda else 'cpu')
+        fp16=bool(cuda) if self.use_fp16 is None else bool(self.use_fp16 and cuda)
+        dtype=torch.float16 if fp16 else torch.float32
+        self.tokenizer=AutoTokenizer.from_pretrained(self.model_name, revision=self.revision, use_fast=True)
+        self.model=AutoModelForSequenceClassification.from_pretrained(self.model_name, revision=self.revision, torch_dtype=dtype)
+        self.model.to(resolved_device); self.model.eval()
+        self.device=resolved_device; self.dtype=str(dtype).replace('torch.','')
+        self.tokenizer_class=self.tokenizer.__class__.__name__; self.tokenizer_is_fast=bool(getattr(self.tokenizer,'is_fast',False))
+        self.model_class=self.model.__class__.__name__; self.transformers_version=getattr(transformers, '__version__', None)
+    def score(self, pairs):
+        if self.model is None or self.tokenizer is None: self.load()
+        import math as _math
+        import torch
+        rows=list(pairs)
+        out=[]
+        for start in range(0, len(rows), max(1,self.batch_size)):
+            batch=rows[start:start+max(1,self.batch_size)]
+            encoded=self.tokenizer(batch, padding=True, truncation=True, max_length=self.max_length, return_tensors='pt')
+            encoded={k:v.to(self.device) for k,v in encoded.items()}
+            with torch.inference_mode():
+                logits=self.model(**encoded).logits.view(-1).float()
+            scores=[float(x) for x in logits.detach().cpu().tolist()]
+            if len(scores) != len(batch):
+                raise ValueError(f'transformers reranker score count mismatch: {len(scores)} != {len(batch)}')
+            if not all(_math.isfinite(x) for x in scores):
+                raise ValueError('transformers reranker produced non-finite scores')
+            out.extend(scores)
+        if len(out) != len(rows):
+            raise ValueError(f'transformers reranker score count mismatch: {len(out)} != {len(rows)}')
+        return out
+    def runtime_info(self):
+        return {'reranker_backend':self.backend,'transformers_version':self.transformers_version,'tokenizer_class':self.tokenizer_class,'tokenizer_is_fast':self.tokenizer_is_fast,'model_class':self.model_class,'device':self.device,'dtype':self.dtype,'score_validation_passed':self.model is not None}
+
+class FlagEmbeddingLegacyRerankerBackend:
+    backend='flagembedding_legacy'
+    def __init__(self, model_name=BGE_RERANKER_MODEL, batch_size=16, max_length=8192, use_fp16=None, device=None, revision='main'):
+        self.model_name=model_name; self.batch_size=batch_size; self.max_length=max_length; self.use_fp16=use_fp16; self.device=device; self.revision=revision; self.model=None; self.dtype=None
     def load(self):
         from FlagEmbedding import FlagReranker
         if self.use_fp16 is None:
@@ -57,6 +107,7 @@ class BGERerankerBackend:
                 import torch; fp16=bool(torch.cuda.is_available())
             except Exception: fp16=False
         else: fp16=bool(self.use_fp16)
+        self.dtype='float16' if fp16 else 'float32'
         self.model=FlagReranker(self.model_name, use_fp16=fp16, device=self.device)
     def score(self, pairs):
         if self.model is None: self.load()
@@ -65,8 +116,13 @@ class BGERerankerBackend:
             batch=rows[start:start+max(1,self.batch_size)]
             scores=self.model.compute_score(batch, batch_size=self.batch_size, max_length=self.max_length)
             if isinstance(scores, (float,int)): scores=[scores]
-            out.extend(float(x) for x in scores)
+            if len(scores) != len(batch): raise ValueError(f'flagembedding_legacy reranker score count mismatch: {len(scores)} != {len(batch)}')
+            vals=[float(x) for x in scores]
+            if not all(math.isfinite(x) for x in vals): raise ValueError('flagembedding_legacy reranker produced non-finite scores')
+            out.extend(vals)
         return out
+    def runtime_info(self):
+        return {'reranker_backend':self.backend,'transformers_version':None,'tokenizer_class':None,'tokenizer_is_fast':None,'model_class':self.model.__class__.__name__ if self.model is not None else None,'device':self.device,'dtype':self.dtype,'score_validation_passed':self.model is not None}
 
 class MockReranker:
     def __init__(self, scores:dict[tuple[str,str],float]|None=None): self.scores=scores or {}; self.calls=[]

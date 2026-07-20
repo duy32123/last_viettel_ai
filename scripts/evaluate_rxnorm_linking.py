@@ -8,6 +8,7 @@ from src.linking.retrieval import load_lexical_index, kb_paths_checksum
 from src.linking.dense import (
     BGEM3Backend,
     BGERerankerBackend,
+    FlagEmbeddingLegacyRerankerBackend,
     MockDenseEncoder,
     MockReranker,
     dense_expected_manifest,
@@ -179,6 +180,7 @@ def main(argv=None):
     bm25_called=dense_called=rerank_called=False
     model_name=model_revision=device=None; cache_validation=None
     reranker_model_name=reranker_model_revision=reranker_device=reranker_fp16=None
+    reranker_runtime_info={}
     selected_on_dev=None; selected_blend_on_dev=None; selected_candidate_strategy=None
     fallback_used=False; dev_before=None; dev_after=None; final_ranking_mode=None
     rank_cache={}; qvec_cache={}
@@ -263,8 +265,20 @@ def main(argv=None):
                 rec=by_code[code]
                 rows.append({'code':code,'canonical_name':rec.canonical_name,'matched_alias':rec.canonical_name,'score':1.0/i,'rank':i,'verified':rec.verified,'source':rec.source,'version':rec.version})
             return rows
-        reranker_model_name=cfg.get('reranker_model_name','BAAI/bge-reranker-v2-m3'); reranker_model_revision=cfg.get('reranker_model_revision','main')
-        reranker=MockReranker() if ns.mock_reranker else BGERerankerBackend(reranker_model_name, int(cfg.get('reranker_batch_size',16)), int(cfg.get('reranker_max_length',8192)), cfg.get('use_fp16'), cfg.get('device'))
+        reranker_cfg=cfg.get('reranker', {}) or {}
+        reranker_backend=reranker_cfg.get('backend', cfg.get('reranker_backend', 'transformers'))
+        reranker_model_name=reranker_cfg.get('model_name', cfg.get('reranker_model_name','BAAI/bge-reranker-v2-m3'))
+        reranker_model_revision=reranker_cfg.get('revision', cfg.get('reranker_model_revision','main'))
+        reranker_batch_size=int(reranker_cfg.get('batch_size', cfg.get('reranker_batch_size',8)))
+        reranker_max_length=int(reranker_cfg.get('max_length', cfg.get('reranker_max_length',512)))
+        if ns.mock_reranker:
+            reranker=MockReranker(); reranker_backend='mock'
+        elif reranker_backend == 'transformers':
+            reranker=BGERerankerBackend(reranker_model_name, reranker_batch_size, reranker_max_length, cfg.get('use_fp16'), cfg.get('device'), revision=reranker_model_revision)
+        elif reranker_backend == 'flagembedding_legacy':
+            reranker=FlagEmbeddingLegacyRerankerBackend(reranker_model_name, reranker_batch_size, reranker_max_length, cfg.get('use_fp16'), cfg.get('device'), revision=reranker_model_revision)
+        else:
+            raise ValueError(f'unsupported reranker backend: {reranker_backend}')
         reranker_device=getattr(reranker,'device',None) or ('mock' if ns.mock_reranker else 'auto'); reranker_fp16=getattr(reranker,'use_fp16',None)
         score_cache={}
         def score_rows(e, rows):
@@ -277,13 +291,15 @@ def main(argv=None):
                     counters['reranker_cache_hits'] += 1
                 else:
                     missing.append((k, q, candidate_passage(r)))
-            bs=max(1,int(cfg.get('reranker_batch_size',16)))
+            bs=max(1, reranker_batch_size)
             for start in range(0, len(missing), bs):
                 batch=missing[start:start+bs]
                 pairs=[(q,p) for _,q,p in batch]
                 scores=reranker.score(pairs)
                 if len(scores) != len(batch):
-                    raise ValueError('reranker score count mismatch')
+                    raise ValueError(f'{reranker_backend} reranker score count mismatch: {len(scores)} != {len(batch)}')
+                if not all(math.isfinite(float(x)) for x in scores):
+                    raise ValueError(f'{reranker_backend} reranker produced non-finite scores')
                 rerank_called=True
                 counters['reranker_model_calls'] += 1; counters['reranker_batches'] += 1; counters['reranker_pairs_scored'] += len(batch)
                 for (k,_,_),s in zip(batch,scores):
@@ -319,6 +335,7 @@ def main(argv=None):
         # Pre-score dev candidates once; tune_blend only reads cached scores.
         for e in splits.get('dev',[]):
             score_rows(e, retrieval_rows(e))
+        reranker_runtime_info=reranker.runtime_info() if hasattr(reranker, 'runtime_info') else {'reranker_backend':reranker_backend,'device':reranker_device,'dtype':None,'score_validation_passed':rerank_called}
         selected_blend_on_dev=tune_blend(splits.get('dev',[]), retrieval_rows_norm, reranked_rows_norm, weights=tuple(cfg.get('blend_weights',[0.0,0.25,0.5,0.75,1.0])))
         w=float(selected_blend_on_dev['blend_weight'])
         dev_before=_eval_code_ranker({'dev':splits.get('dev',[])}, lambda e: [r['code'] for r in retrieval_rows(e)])['splits'].get('dev',{})
@@ -333,10 +350,10 @@ def main(argv=None):
     if selected_on_dev is not None: out['selected_on_dev']=selected_on_dev
     if selected_candidate_strategy is not None: out['selected_candidate_strategy']=selected_candidate_strategy
     if selected_blend_on_dev is not None:
-        out.update({'selected_blend_on_dev':selected_blend_on_dev,'fallback_used':fallback_used,'dev_before':dev_before,'dev_after':dev_after,'reranker_model_name':reranker_model_name,'reranker_model_revision':reranker_model_revision,'reranker_device':reranker_device,'reranker_fp16':reranker_fp16})
+        out.update({'selected_blend_on_dev':selected_blend_on_dev,'fallback_used':fallback_used,'dev_before':dev_before,'dev_after':dev_after,'reranker_model_name':reranker_model_name,'reranker_model_revision':reranker_model_revision,'reranker_device':reranker_device,'reranker_fp16':reranker_fp16, **reranker_runtime_info})
     out.update(_eval_code_ranker(splits, ranker))
     out['dense_backend_called']=dense_called; out['reranker_backend_called']=rerank_called; out['bm25_backend_called']=bm25_called
-    out.update(counters); out['unique_query_count']=len({_key(e) for rows in splits.values() for e in rows})
+    out['reranker_pairs']=counters.get('reranker_pairs_scored',0); out.update(counters); out['unique_query_count']=len({_key(e) for rows in splits.values() for e in rows})
     print(json.dumps(out, ensure_ascii=False, indent=2)); return out
 
 if __name__=='__main__': main()

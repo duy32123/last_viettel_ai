@@ -279,3 +279,107 @@ def test_stable_query_key_avoids_duplicate_dense_searches(tmp_path, monkeypatch)
     out=ev.main(['--config',str(cfg),'--pilot-examples',str(dup),'--mode','bge_dense'])
     assert out['dense_search_calls'] == out['unique_query_count']
     assert out['ranking_cache_hits'] >= 1
+
+
+def test_transformers_reranker_uses_callable_tokenizer_without_prepare_for_model(monkeypatch):
+    import sys, types
+    from src.linking.dense import BGERerankerBackend
+    class FakeTensor:
+        def __init__(self, vals): self.vals=vals
+        def to(self, device): return self
+        def view(self, *args): return self
+        def float(self): return self
+        def detach(self): return self
+        def cpu(self): return self
+        def tolist(self): return list(self.vals)
+    class FakeTokenizer:
+        is_fast=True
+        def __call__(self, pairs, padding, truncation, max_length, return_tensors):
+            assert padding is True and truncation is True and return_tensors == 'pt'
+            assert max_length == 7
+            return {'input_ids': FakeTensor([1]*len(pairs)), 'attention_mask': FakeTensor([1]*len(pairs))}
+    class FakeModel:
+        def to(self, device): self.device=device; return self
+        def eval(self): self.eval_called=True; return self
+        def __call__(self, **kw): return types.SimpleNamespace(logits=FakeTensor([0.1, 0.2]))
+    fake_transformers=types.SimpleNamespace(
+        __version__='9.9.9',
+        AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *a, **k: FakeTokenizer()),
+        AutoModelForSequenceClassification=types.SimpleNamespace(from_pretrained=lambda *a, **k: FakeModel()),
+    )
+    class InferenceMode:
+        def __enter__(self): return None
+        def __exit__(self, *a): return False
+    fake_torch=types.SimpleNamespace(float16='float16', float32='float32', cuda=types.SimpleNamespace(is_available=lambda: False), inference_mode=lambda: InferenceMode())
+    monkeypatch.setitem(sys.modules, 'transformers', fake_transformers)
+    monkeypatch.setitem(sys.modules, 'torch', fake_torch)
+    backend=BGERerankerBackend('model', batch_size=2, max_length=7, revision='main')
+    scores=backend.score([('q1','p1'),('q2','p2')])
+    assert scores == [0.1, 0.2]
+    assert backend.runtime_info()['reranker_backend'] == 'transformers'
+    assert backend.runtime_info()['tokenizer_class'] == 'FakeTokenizer'
+    assert backend.runtime_info()['tokenizer_is_fast'] is True
+    assert not hasattr(backend.tokenizer, 'prepare_for_model')
+
+
+def test_transformers_reranker_score_count_and_nonfinite_fail(monkeypatch):
+    import sys, types, math
+    from src.linking.dense import BGERerankerBackend
+    class FakeTensor:
+        def __init__(self, vals): self.vals=vals
+        def to(self, device): return self
+        def view(self, *args): return self
+        def float(self): return self
+        def detach(self): return self
+        def cpu(self): return self
+        def tolist(self): return list(self.vals)
+    class FakeTokenizer:
+        is_fast=True
+        def __call__(self, pairs, **kw): return {'input_ids': FakeTensor([1]*len(pairs))}
+    class InferenceMode:
+        def __enter__(self): return None
+        def __exit__(self, *a): return False
+    fake_torch=types.SimpleNamespace(float16='float16', float32='float32', cuda=types.SimpleNamespace(is_available=lambda: False), inference_mode=lambda: InferenceMode())
+    monkeypatch.setitem(sys.modules, 'torch', fake_torch)
+    class ShortModel:
+        def to(self, device): return self
+        def eval(self): return self
+        def __call__(self, **kw): return types.SimpleNamespace(logits=FakeTensor([0.1]))
+    monkeypatch.setitem(sys.modules, 'transformers', types.SimpleNamespace(__version__='x', AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *a, **k: FakeTokenizer()), AutoModelForSequenceClassification=types.SimpleNamespace(from_pretrained=lambda *a, **k: ShortModel())))
+    with pytest.raises(ValueError, match='score count mismatch'):
+        BGERerankerBackend('m', batch_size=2).score([('q1','p1'),('q2','p2')])
+    class NanModel(ShortModel):
+        def __call__(self, **kw): return types.SimpleNamespace(logits=FakeTensor([math.nan, 0.0]))
+    monkeypatch.setitem(sys.modules, 'transformers', types.SimpleNamespace(__version__='x', AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *a, **k: FakeTokenizer()), AutoModelForSequenceClassification=types.SimpleNamespace(from_pretrained=lambda *a, **k: NanModel())))
+    with pytest.raises(ValueError, match='non-finite'):
+        BGERerankerBackend('m', batch_size=2).score([('q1','p1'),('q2','p2')])
+
+
+def test_evaluator_reports_transformers_reranker_runtime_fields(tmp_path, monkeypatch):
+    from scripts import evaluate_rxnorm_linking as ev
+    from src.linking.dense import MockDenseEncoder
+    cfg,pilot=_runtime_fixture(tmp_path)
+    d=json.loads(cfg.read_text())
+    d['reranker']={'backend':'transformers','model_name':'fake-reranker','revision':'r2','batch_size':2,'max_length':9}
+    cfg.write_text(json.dumps(d))
+    class SpyDense:
+        def __init__(self, **kw): self.device='cpu'; self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): return self.enc.encode(texts)
+    class SpyTransformerReranker:
+        backend='transformers'
+        def __init__(self, model_name, batch_size, max_length, use_fp16=None, device=None, revision='main'):
+            self.model_name=model_name; self.batch_size=batch_size; self.max_length=max_length; self.use_fp16=False; self.device='cpu'; self.revision=revision; self.calls=[]
+        def score(self, pairs):
+            rows=list(pairs); self.calls.append(rows); return [float(i) for i,_ in enumerate(rows)]
+        def runtime_info(self):
+            return {'reranker_backend':'transformers','transformers_version':'test','tokenizer_class':'CallableOnlyTokenizer','tokenizer_is_fast':True,'model_class':'FakeSequenceClassifier','device':'cpu','dtype':'float32','score_validation_passed':bool(self.calls)}
+    monkeypatch.setattr(ev, 'BGEM3Backend', SpyDense); monkeypatch.setattr(ev, 'BGERerankerBackend', SpyTransformerReranker)
+    out=ev.main(['--config',str(cfg),'--pilot-examples',str(pilot),'--mode','reranker'])
+    assert out['reranker_backend'] == 'transformers'
+    assert out['transformers_version'] == 'test'
+    assert out['tokenizer_class'] == 'CallableOnlyTokenizer'
+    assert out['tokenizer_is_fast'] is True
+    assert out['model_class'] == 'FakeSequenceClassifier'
+    assert out['score_validation_passed'] is True
+    assert out['reranker_model_name'] == 'fake-reranker' and out['reranker_model_revision'] == 'r2'
+    assert out['reranker_pairs'] == out['reranker_pairs_scored']
