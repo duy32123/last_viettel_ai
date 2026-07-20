@@ -68,3 +68,105 @@ def test_low_vram_mock_stage_orchestration_and_cache_hits():
     meds=[r for r in out if r['type']=='THUỐC']
     assert all(m['candidates'] == ['6809'] for m in meds)
     assert pipe.serializable_report()['candidate_cache_hits'] >= 0
+
+
+def test_non_mock_ner_uses_model_backend_not_rule(monkeypatch):
+    import src.pipeline.end_to_end as e2e
+    c=cfg(); c['ner']={'mock':False,'model_path':'dummy'}; c['assertion']={'mock':True}; c['rxnorm']['retrieval_mode']='lexical_smoke'
+    called={'load':0,'predict':0}
+    def fake_rule(text): raise AssertionError('rule NER fallback used')
+    def fake_load(self):
+        called['load'] += 1; self._ner_model=object(); self._ner_tokenizer=object(); self.report['model_metadata']['ner']={'backend':'test','mock':False,'model_forward_calls':0,'chunks':0,'inference_seconds':0.0}
+    def fake_predict(text, tokenizer, model, **kw):
+        called['predict'] += 1; return [{'text':'đau ngực','type':'TRIỆU_CHỨNG','start':15,'end':23,'score':1.0}]
+    monkeypatch.setattr(e2e, '_rule_ner', fake_rule)
+    monkeypatch.setattr(e2e.EndToEndPipeline, '_load_ner', fake_load)
+    monkeypatch.setattr(e2e, 'predict_with_model', fake_predict)
+    out=e2e.EndToEndPipeline(c).infer_document('Không ghi nhận đau ngực.')
+    assert called == {'load':1,'predict':1}
+    assert out[0]['assertions'] == ['isNegated']
+
+
+def test_non_mock_assertion_passes_model_tokenizer_thresholds(monkeypatch):
+    import src.pipeline.end_to_end as e2e
+    c=cfg(); c['ner']={'mock':True}; c['assertion']={'mock':False,'model_path':'assertion','thresholds_path':'thresholds.json'}
+    seen={}
+    def fake_load(self):
+        self._assertion_model='MODEL'; self._assertion_tokenizer='TOK'; self._assertion_thresholds={'isNegated':0.7}; self.report['model_metadata']['assertion']={'backend':'test','mock':False,'model_forward_calls':0,'example_count':0,'inference_seconds':0.0}
+    def fake_predict(text, entities, model=None, tokenizer=None, thresholds=None, **kw):
+        seen.update({'model':model,'tokenizer':tokenizer,'thresholds':thresholds,'entities':len(entities)})
+        return [{**e,'assertions':['isNegated']} for e in entities]
+    monkeypatch.setattr(e2e.EndToEndPipeline, '_load_assertion', fake_load)
+    monkeypatch.setattr(e2e, 'predict_assertions', fake_predict)
+    out=e2e.EndToEndPipeline(c).infer_document('Không ghi nhận đau ngực.')
+    assert seen == {'model':'MODEL','tokenizer':'TOK','thresholds':{'isNegated':0.7},'entities':1}
+    assert out[0]['assertions'] == ['isNegated']
+
+
+def _dense_pipeline_cfg(tmp_path):
+    from src.data.kb_schema import read_jsonl
+    from src.linking.dense import DenseAliasIndex, MockDenseEncoder, dense_expected_manifest, save_dense_index
+    c=cfg(); c['rxnorm']['retrieval_mode']='bge_dense'; c['rxnorm']['dense_index_dir']=str(tmp_path/'dense'); c['rxnorm']['model_name']='test-bge'; c['rxnorm']['model_revision']='main'; c['rxnorm']['batch_size']=2; c['rxnorm']['max_length']=16
+    kb=Path(c['rxnorm']['kb_dir']); paths=sorted(kb.glob('*.jsonl')); records=[]
+    for p in paths: records.extend(read_jsonl(p))
+    manifest=dense_expected_manifest({'model_name':'test-bge','model_revision':'main','include_unverified':False,'batch_size':2,'max_length':16}, paths, dimension=4, candidate_universe=1)
+    save_dense_index(DenseAliasIndex.build(records, MockDenseEncoder(dim=4), False, manifest), Path(c['rxnorm']['dense_index_dir']), manifest)
+    return c
+
+
+def test_bge_dense_pipeline_loads_dense_encoder_and_does_not_call_lexical_search(tmp_path, monkeypatch):
+    import src.pipeline.end_to_end as e2e
+    from src.linking.dense import MockDenseEncoder
+    from src.linking.retrieval import LexicalIndex
+    c=_dense_pipeline_cfg(tmp_path); c['ner']={'mock':True}; c['assertion']={'mock':True}
+    calls={'encode':0}
+    class SpyBGE:
+        def __init__(self, **kw): self.enc=MockDenseEncoder(dim=4)
+        def encode(self, texts): calls['encode'] += 1; return self.enc.encode(texts)
+    def bomb_search(self, *a, **k): raise AssertionError('BM25 search used in dense-only mode')
+    monkeypatch.setattr(e2e, 'BGEM3Backend', SpyBGE)
+    monkeypatch.setattr(LexicalIndex, 'search', bomb_search)
+    pipe=e2e.EndToEndPipeline(c)
+    out=pipe.infer_document('Người bệnh dùng metformin 500 mg.')
+    assert [r for r in out if r['type']=='THUỐC'][0]['candidates'] == ['6809']
+    meta=pipe.serializable_report()['model_metadata']['rxnorm']
+    assert meta['backend'] == 'bge_dense' and meta['dense_query_encode_calls'] == 1 and meta['dense_search_calls'] == 1
+    assert calls['encode'] == 1
+
+
+def test_dense_missing_cache_fails_closed(tmp_path):
+    c=cfg(); c['rxnorm']['retrieval_mode']='bge_dense'; c['rxnorm']['dense_index_dir']=str(tmp_path/'missing')
+    pipe=EndToEndPipeline(c)
+    with pytest.raises(FileNotFoundError):
+        pipe.infer_document('Người bệnh dùng metformin 500 mg.')
+
+
+def test_low_vram_stage_release_order_for_nonmock_backends(monkeypatch, tmp_path):
+    import src.pipeline.end_to_end as e2e
+    c=_dense_pipeline_cfg(tmp_path); c['runtime']['low_vram_mode']=True; c['ner']={'mock':False,'model_path':'ner'}; c['assertion']={'mock':False,'model_path':'assert'}
+    monkeypatch.setattr(e2e.EndToEndPipeline, '_load_ner', lambda self: (setattr(self,'_ner_model',object()), setattr(self,'_ner_tokenizer',object()), self.report['model_metadata'].setdefault('ner',{'backend':'test','mock':False,'model_forward_calls':0,'chunks':0,'inference_seconds':0.0})))
+    monkeypatch.setattr(e2e, 'predict_with_model', lambda text, tok, model, **kw: [{'text':'metformin 500 mg','type':'THUỐC','start':16,'end':32,'score':1.0}])
+    monkeypatch.setattr(e2e.EndToEndPipeline, '_load_assertion', lambda self: (setattr(self,'_assertion_model','M'), setattr(self,'_assertion_tokenizer','T'), setattr(self,'_assertion_thresholds',{}), self.report['model_metadata'].setdefault('assertion',{'backend':'test','mock':False,'model_forward_calls':0,'example_count':0,'inference_seconds':0.0})))
+    monkeypatch.setattr(e2e, 'predict_assertions', lambda text, ents, **kw: ents)
+    from src.linking.dense import MockDenseEncoder
+    monkeypatch.setattr(e2e, 'BGEM3Backend', lambda **kw: MockDenseEncoder(dim=4))
+    pipe=e2e.EndToEndPipeline(c); pipe.infer_documents(['Người bệnh dùng metformin 500 mg.'])
+    report=pipe.serializable_report()
+    assert report['stage_release_events'] == ['ner','assertion','rxnorm']
+    assert report['low_vram_mode_executed'] is True
+
+
+def test_production_runtime_verified_requires_real_counters(tmp_path, monkeypatch):
+    import src.pipeline.end_to_end as e2e
+    c=_dense_pipeline_cfg(tmp_path); c['production']=True; c['ner']={'mock':False,'model_path':'ner'}; c['assertion']={'mock':False,'model_path':'assert'}; c['rxnorm']['strict']=True
+    monkeypatch.setattr(e2e.EndToEndPipeline, '_load_ner', lambda self: (setattr(self,'_ner_model',object()), setattr(self,'_ner_tokenizer',object()), self.report['model_metadata'].setdefault('ner',{'backend':'test','mock':False,'model_forward_calls':0,'chunks':0,'inference_seconds':0.0})))
+    monkeypatch.setattr(e2e, 'predict_with_model', lambda text, tok, model, **kw: [{'text':'metformin 500 mg','type':'THUỐC','start':16,'end':32,'score':1.0}])
+    monkeypatch.setattr(e2e.EndToEndPipeline, '_load_assertion', lambda self: (setattr(self,'_assertion_model','M'), setattr(self,'_assertion_tokenizer','T'), setattr(self,'_assertion_thresholds',{}), self.report['model_metadata'].setdefault('assertion',{'backend':'test','mock':False,'model_forward_calls':0,'example_count':0,'inference_seconds':0.0})))
+    monkeypatch.setattr(e2e, 'predict_assertions', lambda text, ents, **kw: ents)
+    from src.linking.dense import MockDenseEncoder
+    monkeypatch.setattr(e2e, 'BGEM3Backend', lambda **kw: MockDenseEncoder(dim=4))
+    pipe=e2e.EndToEndPipeline(c); pipe.infer_document('Người bệnh dùng metformin 500 mg.')
+    assert pipe.serializable_report()['production_runtime_verified'] is True
+    c['ner']['mock']=True
+    pipe=e2e.EndToEndPipeline(c); pipe.infer_document('Người bệnh dùng metformin 500 mg.')
+    assert pipe.serializable_report()['production_runtime_verified'] is False

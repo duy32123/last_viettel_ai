@@ -21,9 +21,10 @@ def main(argv=None):
     cfg=load_config(ns.config)
     inp=Path(ns.input_dir); out=Path(ns.output_dir); out.mkdir(parents=True, exist_ok=True)
     pipe=EndToEndPipeline(cfg)
-    for path in sorted(inp.glob('*.txt'), key=_sort_key):
-        text=path.read_text(encoding='utf-8')
-        concepts=pipe.infer_document(text)
+    paths=sorted(inp.glob('*.txt'), key=_sort_key)
+    texts=[path.read_text(encoding='utf-8') for path in paths]
+    results=pipe.infer_documents(texts)
+    for path,concepts in zip(paths, results):
         _atomic_json(out/(path.stem + '.json'), concepts)
     report_path=Path(cfg.get('diagnostics',{}).get('report_path','artifacts/pipeline_run_report.json'))
     report_path.parent.mkdir(parents=True, exist_ok=True)
