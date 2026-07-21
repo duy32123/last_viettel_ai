@@ -1,0 +1,10 @@
+{
+  "production": false,
+  "runtime": {"device": "cpu", "low_vram_mode": true},
+  "ner": {"mock": true},
+  "assertion": {"mock": true},
+  "rxnorm": {"kb_dir": "tests/fixtures/pipeline/rxnorm_kb", "retrieval_mode": "lexical_smoke", "include_unverified": false, "strict": false, "top_k": 5, "use_reranker": false},
+  "icd10": {"kb_dir": "tests/fixtures/pipeline/icd_aux_kb", "include_unverified": false, "require": false, "top_k": 5},
+  "diagnostics": {"report_path": "artifacts/pipeline_run_report.json"},
+  "official_evaluation": false
+}

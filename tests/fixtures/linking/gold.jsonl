@@ -1,0 +1,1 @@
+{"id":"d1","text":"Bệnh nhân ĐTĐ dùng Metformin 500 mg. HbA1c 8.1%.","entities":[{"text":"ĐTĐ","type":"CHẨN_ĐOÁN","position":[10,13],"gold_code":"E11"},{"text":"Metformin 500 mg","type":"THUỐC","position":[19,35],"gold_code":"6809"}]}

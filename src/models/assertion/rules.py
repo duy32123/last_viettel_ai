@@ -1,15 +1,15 @@
 from __future__ import annotations
-import re
+import re, unicodedata
 from dataclasses import dataclass
 from typing import Any
 from .labels import ordered
 
 NEGATED="isNegated"; FAMILY="isFamily"; HISTORICAL="isHistorical"
-_BREAK_RE=re.compile(r"(?:\bnhưng\b|\btuy nhiên\b|\bsong\b|\btuy vậy\b|[.;!?\n\r])", re.I)
-NEG_CUES=["không ghi nhận","không có dấu hiệu","âm tính với","phủ nhận","loại trừ","không","chưa","chẳng"]
-FAMILY_CUES=["tiền sử gia đình","gia đình","người nhà","mẹ","bố","cha","ba","anh","chị","em","con","ông","bà"]
-HIST_CUES=["tiền sử","trước đây","đã từng","từng","hồi nhỏ","thuốc trước nhập viện","bệnh cũ","đã điều trị"]
-CURRENT_CUES=["hiện tại","khám hiện tại","lý do vào viện","vào viện"]
+_BREAK_RE=re.compile(r"(?:\bnhưng\b|\bnhung\b|\btuy nhiên\b|\btuy nhien\b|\bsong\b|\btuy vậy\b|[.;!?\n\r])", re.I)
+NEG_CUES=["không ghi nhận","khong ghi nhan","không có dấu hiệu","khong co dau hieu","âm tính với","am tinh voi","phủ nhận","phu nhan","loại trừ","loai tru","không","khong","chưa","chua","chẳng","chang"]
+FAMILY_CUES=["tiền sử gia đình","tien su gia dinh","gia đình","gia dinh","người nhà","nguoi nha","thân nhân","than nhan","mẹ","me","bố","bo","cha","anh ruột","anh ruot","chị ruột","chi ruot","em ruột","em ruot","ông","ong","bà","họ hàng","ho hang","dòng họ","dong ho"]
+HIST_CUES=["tiền sử","tien su","trước đây","truoc day","đã từng","da tung","từng","tung","lần trước","lan truoc","hồ sơ cũ","ho so cu","nhiều năm trước","nhieu nam truoc","bệnh sử cũ","benh su cu","thông tin trước đây","thong tin truoc day","hồi nhỏ","hoi nho","thuốc trước nhập viện","thuoc truoc nhap vien","bệnh cũ","benh cu","đã điều trị","da dieu tri"]
+CURRENT_CUES=["hiện tại","hien tai","khám hiện tại","kham hien tai","lý do vào viện","ly do vao vien","vào viện","vao vien","đợt này","dot nay"]
 
 @dataclass
 class RuleHit:
@@ -30,31 +30,36 @@ def _same_scope(text: str, cue_end: int, ent_start: int) -> bool:
     between=text[cue_end:ent_start]
     return _BREAK_RE.search(between) is None
 
+def _fold(text: str) -> str:
+    return unicodedata.normalize("NFC", "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")).casefold()
+
 def _find_cue(text: str, cues: list[str], start: int, end: int, left=80):
-    lo=max(0,start-left); prefix=text[lo:start].casefold()
+    lo=max(0,start-left); prefix=_fold(text[lo:start])
     best=None
     for cue in cues:
-        pattern=r"(?<!\w)" + re.escape(cue.casefold()) + r"(?!\w)"
+        pattern=r"(?<!\w)" + re.escape(_fold(cue)) + r"(?!\w)"
         for m in re.finditer(pattern, prefix):
             abs_s=lo+m.start(); abs_e=lo+m.end()
             if best is None or abs_e > best[2]: best=(cue,abs_s,abs_e)
     return best
 
 def _in_section(text: str, start: int, cue: str) -> bool:
-    lo=max(0,start-200); segment=text[lo:start].casefold()
+    lo=max(0,start-200); segment=_fold(text[lo:start]); cue=_fold(cue)
+    last_current=max((segment.rfind(_fold(cur)) for cur in CURRENT_CUES), default=-1)
     cpos=segment.rfind(cue)
     if cpos < 0: return False
+    if last_current > cpos: return False
     after=segment[cpos:]
-    return not any(cur in after for cur in CURRENT_CUES)
+    return not any(_fold(cur) in after for cur in CURRENT_CUES)
 
 def rule_assertions(text: str, entity: dict[str,Any]) -> dict[str,Any]:
     start,end=entity["position"] if "position" in entity else (entity["start"], entity["end"])
     if text[start:end] != entity["text"]: raise ValueError("entity offset invariant failed")
-    hits=[]; low=text.casefold()
+    hits=[]; low=_fold(text)
     # Negation: ignore idiom "không những ... mà còn".
     lo,hi=_window(text,start,end)
     local=low[lo:hi]
-    if "không những" not in local:
+    if "khong nhung" not in local:
         cue=_find_cue(text, NEG_CUES, start, end)
         if cue and _same_scope(text, cue[2], start): hits.append(RuleHit(NEGATED, cue[0], cue[1], cue[2], "neg_scope").asdict())
     # Family cue before entity in same clause/section.

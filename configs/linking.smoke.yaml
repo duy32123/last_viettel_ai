@@ -1,0 +1,8 @@
+{
+  "kb_dir": "/tmp/last_viettel_ai_linking/kb",
+  "index_dir": "/tmp/last_viettel_ai_linking/index",
+  "top_k": 5,
+  "production": false,
+  "use_bge": false,
+  "use_reranker": false
+}

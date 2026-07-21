@@ -1,0 +1,22 @@
+{
+  "output_dir": "data/processed/linking_kb_icd10_vn_qd4469",
+  "production": true,
+  "sources": [
+    {
+      "name": "official_icd10_vn_qd4469",
+      "kind": "icd_official",
+      "terminology": "ICD-10",
+      "version": "QD-4469-2020",
+      "path": "data/raw/icd10/qdm_4469_icd10.csv",
+      "verified": true,
+      "field_map": {
+        "code": "code",
+        "title": "title",
+        "aliases": "aliases",
+        "parent": "parent",
+        "version": "version",
+        "language": "language"
+      }
+    }
+  ]
+}

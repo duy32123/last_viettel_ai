@@ -23,18 +23,23 @@ def multilabel_metrics(gold: list[list[str]], pred: list[list[str]]) -> dict:
 def labels_from_scores(scores, thresholds):
     return [ordered([lab for lab,score in zip(ASSERTION_LABELS,row) if float(score) >= float(thresholds.get(lab,0.5))]) for row in scores]
 
-def tune_thresholds(y_true, y_scores):
+def tune_thresholds(y_true, y_scores, min_precision: float=0.95):
     for i,lab in enumerate(ASSERTION_LABELS):
         vals=[row[i] for row in y_true]
         if not any(vals) or all(vals):
             raise ValueError(f"cannot tune threshold for {lab}: dev set must contain positive and negative examples")
     best={}
     for i,lab in enumerate(ASSERTION_LABELS):
-        best_t=0.5; best_f=-1.0
+        best_t=None; best_rec=-1.0; best_f=-1.0; best_prec=0.0
         for t in [x/100 for x in range(5,96,5)]:
             g=[[lab] if row[i] else [] for row in y_true]; p=[[lab] if row[i] >= t else [] for row in y_scores]
-            f=multilabel_metrics(g,p)["per_label"][lab]["f1"]
-            if f > best_f or (f == best_f and abs(t-0.5) < abs(best_t-0.5)):
-                best_f=f; best_t=t
-        best[lab]={"threshold":best_t,"f1":best_f}
+            vals=multilabel_metrics(g,p)["per_label"][lab]
+            if vals["precision"] < min_precision:
+                continue
+            if vals["recall"] > best_rec or (vals["recall"] == best_rec and (vals["f1"] > best_f or (vals["f1"] == best_f and (best_t is None or t > best_t)))):
+                best_t=t; best_rec=vals["recall"]; best_f=vals["f1"]; best_prec=vals["precision"]
+        if best_t is None:
+            best[lab]={"threshold":1.01,"disabled":True,"reason":f"no threshold reached precision >= {min_precision}","precision":0.0,"recall":0.0,"f1":0.0}
+        else:
+            best[lab]={"threshold":best_t,"disabled":False,"precision":best_prec,"recall":best_rec,"f1":best_f,"min_precision":min_precision}
     return best
