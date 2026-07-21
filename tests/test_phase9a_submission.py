@@ -12,7 +12,7 @@ def test_validate_submission_schema_and_tamper_fail(tmp_path):
     for p in src.glob('*.json'): (out/p.name).write_text(p.read_text(encoding='utf-8'), encoding='utf-8')
     report=validate('tests/fixtures/pipeline/input', out, rxnorm_kb='tests/fixtures/pipeline/rxnorm_kb')
     assert report['valid'] is True and report['output_count']==2
-    rows=json.loads((out/'sample.json').read_text())
+    rows=json.loads((out/'sample.json').read_text(encoding="utf-8"))
     rows[0]['relations']=[]
     (out/'sample.json').write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
     with pytest.raises(ValueError, match='unsupported keys'):

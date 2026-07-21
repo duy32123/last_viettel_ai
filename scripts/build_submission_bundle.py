@@ -17,7 +17,7 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 def _git(code_root: Path, args: list[str]) -> str:
-    return subprocess.check_output(['git', *args], cwd=code_root, text=True).strip()
+    return subprocess.check_output(['git', *args], cwd=code_root, text=True, encoding="utf-8").strip()
 
 def git_sha(code_root: Path) -> str:
     return _git(code_root, ['rev-parse','HEAD'])

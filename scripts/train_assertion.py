@@ -11,7 +11,7 @@ def load_jsonl(path):
     p=Path(path); return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()] if p.exists() else []
 
 def git_sha():
-    try: return subprocess.check_output(["git","rev-parse","HEAD"], text=True).strip()
+    try: return subprocess.check_output(["git","rev-parse","HEAD"], text=True, encoding="utf-8").strip()
     except Exception: return None
 
 def cfg_bool(cfg, key, default=False): return bool(cfg.get(key, default))

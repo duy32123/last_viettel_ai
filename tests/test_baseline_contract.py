@@ -24,7 +24,7 @@ def test_cli_reads_sorted_txt_and_writes_json(tmp_path):
     inp=tmp_path/"input"; out=tmp_path/"output"; inp.mkdir()
     (inp/"2.txt").write_text("Bệnh nhân ho.", encoding="utf-8")
     (inp/"1.txt").write_text("WBC: 5 /mm3\nparacetamol 500 mg po", encoding="utf-8")
-    cp=subprocess.run([sys.executable,"run_pipeline.py",str(inp),str(out)], text=True, capture_output=True, check=True)
+    cp=subprocess.run([sys.executable,"run_pipeline.py",str(inp),str(out)], text=True, capture_output=True, check=True, encoding="utf-8")
     assert "Đã xử lý 2 file" in cp.stdout
     assert [p.name for p in sorted(out.glob("*.json"))] == ["1.json","2.json"]
     for p in out.glob("*.json"):

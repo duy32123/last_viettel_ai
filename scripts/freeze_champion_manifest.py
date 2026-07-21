@@ -15,7 +15,7 @@ def component(root: Path):
     return {'path':str(root),'file_count':len(files),'size_bytes':sum(p.stat().st_size for p in files),'checksums':{str(p.relative_to(root)):sha256(p) for p in files}}
 
 def git_sha():
-    try: return subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+    try: return subprocess.check_output(['git','rev-parse','HEAD'], text=True, encoding="utf-8").strip()
     except Exception: return None
 
 def build_manifest(args):

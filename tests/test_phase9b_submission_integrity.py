@@ -51,24 +51,24 @@ def test_preflight_detects_tamper_missing_unexpected_and_nulls(tmp_path):
     with pytest.raises(ValueError, match='missing'):
         submission_preflight.main(['--bundle-root',str(root),'--manifest',str(root/'champion_manifest.json')])
     root=_bundle(tmp_path/'u')
-    (root/'extra.bin').write_text('x')
+    (root/'extra.bin').write_text('x', encoding="utf-8")
     with pytest.raises(ValueError, match='unexpected_files'):
         submission_preflight.main(['--bundle-root',str(root),'--manifest',str(root/'champion_manifest.json')])
     root=_bundle(tmp_path/'n')
-    m=json.loads((root/'champion_manifest.json').read_text()); m['code_git_sha']=None
+    m=json.loads((root/'champion_manifest.json').read_text(encoding="utf-8")); m['code_git_sha']=None
     (root/'champion_manifest.json').write_text(json.dumps(m), encoding='utf-8')
     with pytest.raises(ValueError, match='code_git_sha'):
         submission_preflight.main(['--bundle-root',str(root),'--manifest',str(root/'champion_manifest.json')])
 
 def test_preflight_rejects_path_escape_and_symlink_escape(tmp_path):
     root=_bundle(tmp_path)
-    m=json.loads((root/'champion_manifest.json').read_text()); m['ner']['path']='../escape'
+    m=json.loads((root/'champion_manifest.json').read_text(encoding="utf-8")); m['ner']['path']='../escape'
     (root/'champion_manifest.json').write_text(json.dumps(m), encoding='utf-8')
     # update checksum so path gate is what fails
     lines=[]
     for f in sorted(p for p in root.rglob('*') if p.is_file() and p.name!='SHA256SUMS.txt'):
         lines.append(f'{_sha(f)}  {f.relative_to(root).as_posix()}')
-    (root/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n')
+    (root/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n', encoding="utf-8")
     with pytest.raises(ValueError, match='unsafe manifest path'):
         submission_preflight.main(['--bundle-root',str(root),'--manifest',str(root/'champion_manifest.json')])
 
@@ -85,7 +85,7 @@ def test_package_requires_rxnorm_and_rejects_unknown_rxcui(tmp_path):
     out=tmp_path/'out'; out.mkdir()
     for p in Path('tests/fixtures/pipeline/expected').glob('*.json'):
         (out/p.name).write_text(p.read_text(encoding='utf-8'), encoding='utf-8')
-    rows=json.loads((out/'sample.json').read_text()); rows[2]['candidates']=['999999']
+    rows=json.loads((out/'sample.json').read_text(encoding="utf-8")); rows[2]['candidates']=['999999']
     (out/'sample.json').write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
     with pytest.raises(ValueError, match='unknown RxCUI'):
         package_submission.main(['--input-dir','tests/fixtures/pipeline/input','--output-dir',str(out),'--zip-path',str(tmp_path/'x.zip'),'--rxnorm-kb','tests/fixtures/pipeline/rxnorm_kb'])

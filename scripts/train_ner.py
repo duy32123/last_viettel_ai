@@ -151,7 +151,7 @@ def main():
     args=TrainingArguments(**training_args_kwargs(TrainingArguments, cfg, out, interval))
     collator=DataCollatorForTokenClassification(tok)
     trainer=Trainer(**trainer_kwargs(Trainer, model, args, FeatureDataset(train_features), FeatureDataset(dev_features), tok, collator, build_compute_metrics(dev_features, model.config.id2label), [EarlyStoppingCallback(early_stopping_patience=int(cfg.get("early_stopping_patience",2)))]))
-    sha=subprocess.run(["git","rev-parse","HEAD"], text=True, capture_output=True).stdout.strip()
+    sha=subprocess.run(["git","rev-parse","HEAD"], text=True, capture_output=True, encoding="utf-8").stdout.strip()
     (out/"training_manifest.json").write_text(json.dumps({"config":cfg,"gate":gate.__dict__,"data_quality_report":report,"train_preprocess_stats":train_stats.__dict__,"dev_preprocess_stats":dev_stats.__dict__,"git_commit":sha}, ensure_ascii=False, indent=2), encoding="utf-8")
     trainer.train(resume_from_checkpoint=ns.resume_from_checkpoint or cfg.get("resume_from_checkpoint"))
     trainer.save_model(str(out/"best")); tok.save_pretrained(str(out/"best"))

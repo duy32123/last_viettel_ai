@@ -5,7 +5,7 @@ from src.data.kb_schema import read_jsonl
 from src.linking.dense import BGEM3Backend, DenseAliasIndex, save_dense_index, dense_expected_manifest
 
 def main():
- p=argparse.ArgumentParser(); p.add_argument('--config', default='configs/linking.bge_m3_pilot.yaml'); p.add_argument('--dry-run', action='store_true'); ns=p.parse_args(); cfg=json.loads(Path(ns.config).read_text())
+ p=argparse.ArgumentParser(); p.add_argument('--config', default='configs/linking.bge_m3_pilot.yaml'); p.add_argument('--dry-run', action='store_true'); ns=p.parse_args(); cfg=json.loads(Path(ns.config).read_text(encoding="utf-8"))
  paths=sorted(Path(cfg['kb_dir']).glob('*.jsonl')); records=[]
  for pth in paths: records.extend(read_jsonl(pth))
  include=bool(cfg.get('include_unverified',False)); universe=sum(1 for r in records if r.verified or include)

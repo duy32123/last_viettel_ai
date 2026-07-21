@@ -35,7 +35,7 @@ def _make_candidate_rows(records, code_order, dense_by_code):
 
 def main(argv=None):
     ap=argparse.ArgumentParser(); ap.add_argument('--config', default='configs/linking.bge_m3_pilot.yaml'); ap.add_argument('--pilot-examples', default='data/processed/linking_kb_auxiliary/auxiliary_pilot_examples.json'); ap.add_argument('--mock-dense', action='store_true'); ap.add_argument('--mock-reranker', action='store_true'); ns=ap.parse_args(argv)
-    cfg=json.loads(Path(ns.config).read_text())
+    cfg=json.loads(Path(ns.config).read_text(encoding="utf-8"))
     records,kb_paths=_load_records(cfg['kb_dir']); splits=_rows_from_pilot(ns.pilot_examples); leak=assert_no_query_kb_leakage(records,splits)
     include_unverified=bool(cfg.get('include_unverified',False)); all_codes=sorted({r.code for r in records if r.verified or include_unverified})
     bm25=LexicalIndex(records, include_unverified=include_unverified)
@@ -73,3 +73,4 @@ def main(argv=None):
     out={'official_evaluation':False,'task':'note_to_code_auxiliary_rerank','query_kb_overlap':leak['query_kb_overlap'],'mock_dense':bool(ns.mock_dense),'mock_reranker':bool(ns.mock_reranker),'dense_preflight':preflight,'selected_candidate_strategy':selected,'rrf_params':params,'original_candidate_ranking':original,'reranker_only':reranked,'selected_blend_on_dev':blend,'fallback_to_phase7b':fallback,'candidate_recall':{sp:_candidate_recall(rows, original_rows) for sp,rows in keyed.items()},'candidate_membership_unchanged':True,'latency_sec':time.time()-start,'pair_count':pair_count,'pair_throughput_per_sec':pair_count/((time.time()-start) or 1.0),'peak_vram':None,'readiness':'INVALID_MOCK_RUN' if ns.mock_reranker or ns.mock_dense else ('FALLBACK_TO_PHASE7B' if fallback else 'RERANKER_EVALUATED_NOT_OFFICIAL')}
     print(json.dumps(out, ensure_ascii=False, indent=2)); return out
 if __name__=='__main__': main()
+

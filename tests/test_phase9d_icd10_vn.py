@@ -49,7 +49,7 @@ def test_bundle_manifest_preflight_and_package_support_icd10_kb(tmp_path):
     icd=tmp_path/'icd'; write_jsonl(icd/'icd10.jsonl', import_icd_official(Path('tests/fixtures/linking/icd10_fixture.csv'), 'ICD-10', 'TEST-2026', 'fixture', True))
     out=tmp_path/'bundle'
     build_submission_bundle.main(['--code-root',str(_clean_code_root(tmp_path)), '--ner-model',str(ner),'--assertion-model',str(assertion),'--rxnorm-kb',str(kb),'--icd10-kb',str(icd),'--rxnorm-dense-index',str(dense),'--bge-model',str(bge),'--output',str(out)])
-    manifest=json.loads((out/'champion_manifest.json').read_text())
+    manifest=json.loads((out/'champion_manifest.json').read_text(encoding="utf-8"))
     assert manifest['icd10']['path'] == 'kb/icd10'
     submission_preflight.main(['--bundle-root',str(out),'--manifest',str(out/'champion_manifest.json'),'--output',str(tmp_path/'pf.json')])
     output=tmp_path/'output'; output.mkdir(); input_dir=tmp_path/'input'; input_dir.mkdir()

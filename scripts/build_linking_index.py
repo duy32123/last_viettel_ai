@@ -11,7 +11,7 @@ def main(argv=None):
     p.add_argument('--config', default='configs/linking.yaml')
     p.add_argument('--dry-run', action='store_true')
     ns=p.parse_args(argv)
-    cfg=json.loads(Path(ns.config).read_text())
+    cfg=json.loads(Path(ns.config).read_text(encoding="utf-8"))
     kb=Path(cfg['kb_dir'])
     out=Path(cfg.get('index_dir','data/processed/linking_index'))
     paths=sorted(kb.glob('*.jsonl')) if kb.exists() else []

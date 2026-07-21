@@ -10,7 +10,7 @@ from src.linking.pipeline import validate_kb
 LOCAL_SOURCE_KINDS={"icd_official","rxnorm_rrf","rxnorm_csv"}
 
 def main():
- p=argparse.ArgumentParser(); p.add_argument('--config', default='configs/linking_kb.yaml'); ns=p.parse_args(); cfg=json.loads(Path(ns.config).read_text())
+ p=argparse.ArgumentParser(); p.add_argument('--config', default='configs/linking_kb.yaml'); ns=p.parse_args(); cfg=json.loads(Path(ns.config).read_text(encoding="utf-8"))
  out=Path(cfg.get('output_dir','data/processed/linking_kb')); out.mkdir(parents=True, exist_ok=True); all_records=[]; manifests=[]
  for src in cfg.get('sources',[]):
   kind=src.get('kind')

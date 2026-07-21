@@ -25,8 +25,9 @@ def test_vietmed_mapping_unicode_crlf_and_reconstruction(tmp_path):
 
 
 def test_license_aware_missing_local_data_and_corpus_outputs(tmp_path):
-    cfg=json.loads(Path("tests/fixtures/real_corpus/corpus_config.json").read_text())
-    cfg_text=json.dumps(cfg, ensure_ascii=False).replace("OUT", str(tmp_path))
+    cfg=json.loads(Path("tests/fixtures/real_corpus/corpus_config.json").read_text(encoding="utf-8"))
+    escaped_tmp_path=json.dumps(str(tmp_path))[1:-1]
+    cfg_text=json.dumps(cfg, ensure_ascii=False).replace("OUT", escaped_tmp_path)
     cfg_path=tmp_path/"cfg.json"; cfg_path.write_text(cfg_text, encoding="utf-8")
     report=build_corpus(cfg_path)
     assert report["real_records"] == 4

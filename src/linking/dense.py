@@ -232,9 +232,9 @@ def save_dense_index(index:DenseAliasIndex, out_dir:Path, manifest:dict):
 
 def load_dense_index(out_dir:Path, expected:dict):
     if not (out_dir/'dense_manifest.json').exists(): raise FileNotFoundError(f'dense index missing: {out_dir}')
-    manifest=json.loads((out_dir/'dense_manifest.json').read_text())
+    manifest=json.loads((out_dir/'dense_manifest.json').read_text(encoding="utf-8"))
     validate_dense_manifest(manifest, expected)
-    entries=[AliasEntry(**d) for d in json.loads((out_dir/'alias_to_code.json').read_text())]
+    entries=[AliasEntry(**d) for d in json.loads((out_dir/'alias_to_code.json').read_text(encoding="utf-8"))]
     dim=int(manifest['dimension'])
     if (out_dir/'embeddings.npy').exists() and np is not None:
         matrix=np.load(out_dir/'embeddings.npy', mmap_mode='r')
@@ -245,7 +245,7 @@ def load_dense_index(out_dir:Path, expected:dict):
             norms=np.linalg.norm(chunk, axis=1)
             if not np.allclose(norms, 1.0, atol=1e-4): raise ValueError('dense cache vectors are not L2-normalized')
         return DenseAliasIndex(entries, matrix, manifest, already_normalized=True)
-    vecs=json.loads((out_dir/'embeddings.json').read_text())
+    vecs=json.loads((out_dir/'embeddings.json').read_text(encoding="utf-8"))
     if vecs and any(len(v)!=dim for v in vecs): raise ValueError('dense cache vector dimension mismatch')
     if vecs and any(abs(math.sqrt(sum(float(x)*float(x) for x in v))-1.0)>1e-4 for v in vecs): raise ValueError('dense cache vectors are not L2-normalized')
     return DenseAliasIndex(entries, vecs, manifest, already_normalized=True)
@@ -321,3 +321,4 @@ def tune_rrf(dev_examples, bm25_ranker, dense_ranker, weights=(0.0,0.5,1.0,2.0),
         m=metrics_from_ranks(ranks); key=(m['recall@10'],m['mrr'],m['recall@1'], -wb, -wd, -k)
         if best is None or key>best[0]: best=(key,{'bm25_weight':wb,'dense_weight':wd,'rrf_k':k,'dev_metrics':m})
     return best[1]
+

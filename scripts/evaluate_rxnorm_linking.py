@@ -70,7 +70,7 @@ def _load_lightweight(kb_dir, *, include_relationships: bool = False):
 
 
 def _examples(path):
-    d=json.loads(Path(path).read_text())
+    d=json.loads(Path(path).read_text(encoding="utf-8"))
     return d.get('splits', d)
 
 
@@ -159,7 +159,7 @@ def main(argv=None):
     p.add_argument('--mock-reranker', action='store_true')
     p.add_argument('--dry-run', action='store_true')
     ns=p.parse_args(argv)
-    cfg=json.loads(Path(ns.config).read_text())
+    cfg=json.loads(Path(ns.config).read_text(encoding="utf-8"))
     kb_dir=Path(cfg['kb_dir']); paths=_paths(kb_dir); requested=ns.mode
     if ns.dry_run:
         print(json.dumps({'requested_mode':requested,'executed_backend':None,'dry_run':True,'backend_executed':False,'expected_artifacts':{'lexical_index_dir':cfg.get('index_dir'),'dense_index_dir':cfg.get('dense_index_dir')},'official_evaluation':False}, indent=2))

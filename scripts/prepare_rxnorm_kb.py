@@ -22,7 +22,7 @@ def atomic_jsonl(path: Path, records):
 
 def main(argv=None):
     p=argparse.ArgumentParser(); p.add_argument('--config', default='configs/linking_kb.rxnorm_prescribable.yaml'); p.add_argument('--zip-path', default=None); p.add_argument('--version', default=None); p.add_argument('--expected-md5', default=''); p.add_argument('--dry-run', action='store_true'); ns=p.parse_args(argv)
-    cfg=json.loads(Path(ns.config).read_text())
+    cfg=json.loads(Path(ns.config).read_text(encoding="utf-8"))
     zip_path=Path(ns.zip_path or cfg['zip_path']); version=ns.version or cfg.get('version'); expected_md5=ns.expected_md5 or cfg.get('expected_md5','')
     if not version or version=='override-required': raise SystemExit('RxNorm release version/date must be supplied via config or --version.')
     if ns.dry_run:

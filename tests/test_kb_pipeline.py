@@ -12,7 +12,9 @@ def test_importer_dedupes_versioned_codes():
 
 
 def test_build_kb_fixture(tmp_path):
-    cfg=tmp_path/"cfg.yaml"; cfg.write_text('{"output_dir":"'+str(tmp_path)+'","sources":[{"name":"icd","kind":"icd_csv","terminology":"ICD-10","version":"v1","path":"tests/fixtures/kb/icd_fixture.csv","verified":false},{"name":"rx","kind":"rxnorm_csv","version":"v1","path":"tests/fixtures/kb/rxnorm_fixture.csv","verified":false}]}', encoding="utf-8")
+    cfg=tmp_path/"cfg.yaml"
+    cfg_data={"output_dir":str(tmp_path),"sources":[{"name":"icd","kind":"icd_csv","terminology":"ICD-10","version":"v1","path":"tests/fixtures/kb/icd_fixture.csv","verified":False},{"name":"rx","kind":"rxnorm_csv","version":"v1","path":"tests/fixtures/kb/rxnorm_fixture.csv","verified":False}]}
+    cfg.write_text(json.dumps(cfg_data), encoding="utf-8")
     counts=build(cfg)
     assert counts=={"icd":1,"rxnorm":1}
     assert (tmp_path/"manifest.json").exists()
@@ -20,9 +22,11 @@ def test_build_kb_fixture(tmp_path):
 
 
 def test_production_config_skips_without_user_data(tmp_path):
-    cfg=tmp_path/"prod.json"; cfg.write_text('{"output_dir":"'+str(tmp_path)+'","sources":[{"name":"missing","kind":"icd_csv","terminology":"ICD-10","version":"user-provided","path":"'+str(tmp_path/'missing.csv')+'","verified":true}]}', encoding="utf-8")
+    cfg=tmp_path/"prod.json"
+    cfg_data={"output_dir":str(tmp_path),"sources":[{"name":"missing","kind":"icd_csv","terminology":"ICD-10","version":"user-provided","path":str(tmp_path/"missing.csv"),"verified":True}]}
+    cfg.write_text(json.dumps(cfg_data), encoding="utf-8")
     assert build(cfg) == {"icd":0,"rxnorm":0}
-    assert json.loads((tmp_path/"manifest.json").read_text())[0]["status"] == "skipped_missing"
+    assert json.loads((tmp_path/"manifest.json").read_text(encoding="utf-8"))[0]["status"] == "skipped_missing"
 
 
 def test_legacy_seed_keeps_configured_icd_variant_for_dotted_and_plain_codes(tmp_path):

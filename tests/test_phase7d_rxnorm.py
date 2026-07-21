@@ -97,7 +97,7 @@ def test_missing_rxnconso_and_invalid_zip_fail(tmp_path):
     with zipfile.ZipFile(missing,'w') as z: z.writestr('RXNREL.RRF','')
     with pytest.raises(ValueError, match='missing RXNCONSO'):
         import_rxnorm_prescribable(missing, version='v')
-    bad=tmp_path/'bad.zip'; bad.write_text('not a zip')
+    bad=tmp_path/'bad.zip'; bad.write_text('not a zip', encoding="utf-8")
     with pytest.raises(ValueError, match='invalid RxNorm ZIP'):
         import_rxnorm_prescribable(bad, version='v')
 
@@ -121,12 +121,12 @@ def test_prepare_md5_mismatch_and_atomic_output_preserves_old_file(tmp_path):
     from scripts import prepare_rxnorm_kb as prep
     z=make_zip(tmp_path,[conso('1', name='drug a')])
     cfg={'zip_path':str(z),'output_dir':str(tmp_path/'out'),'version':'v','source_url':'url'}
-    cfg_path=tmp_path/'cfg.json'; cfg_path.write_text(json.dumps(cfg))
+    cfg_path=tmp_path/'cfg.json'; cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
     with pytest.raises(SystemExit, match='MD5 mismatch'):
         prep.main(['--config',str(cfg_path),'--expected-md5','deadbeef'])
     out=tmp_path/'out'; out.mkdir(); old=out/'rxnorm.jsonl'; old.write_text('old', encoding='utf-8')
-    bad_cfg={**cfg,'zip_path':str(tmp_path/'bad.zip')}; (tmp_path/'bad.zip').write_text('bad')
-    bad_path=tmp_path/'badcfg.json'; bad_path.write_text(json.dumps(bad_cfg))
+    bad_cfg={**cfg,'zip_path':str(tmp_path/'bad.zip')}; (tmp_path/'bad.zip').write_text('bad', encoding="utf-8")
+    bad_path=tmp_path/'badcfg.json'; bad_path.write_text(json.dumps(bad_cfg), encoding="utf-8")
     with pytest.raises(ValueError): prep.main(['--config',str(bad_path)])
     assert old.read_text(encoding='utf-8') == 'old'
 

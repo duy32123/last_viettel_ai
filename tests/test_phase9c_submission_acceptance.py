@@ -1,10 +1,41 @@
 from __future__ import annotations
-import json, subprocess
+import json, subprocess, tempfile
 from pathlib import Path
 import pytest
 from scripts import build_submission_bundle, submission_preflight, materialize_hf_snapshot
 from src.data.kb_schema import KBRecord, write_jsonl
 from src.linking.dense import AliasEntry, DenseAliasIndex, save_dense_index, dense_expected_manifest
+
+
+def _can_create_symlinks() -> bool:
+    """Probe whether this OS/user is allowed to create filesystem symlinks.
+
+    On Windows, creating a symlink requires either Developer Mode to be
+    enabled or the process to run elevated (Administrator); otherwise
+    os.symlink raises OSError [WinError 1314]. This is an environment/
+    privilege limitation, not a bug in the code under test, so the two
+    tests that rely on real symlinks are skipped (not failed) when the
+    current environment cannot create one.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            target = d / "probe_target"
+            target.write_text("x", encoding="utf-8")
+            link = d / "probe_link"
+            link.symlink_to(target)
+        return True
+    except (OSError, NotImplementedError):
+        return False
+
+
+_SYMLINK_SKIP_REASON = (
+    "Environment cannot create symlinks (Windows requires Developer Mode "
+    "or an elevated/Administrator process for os.symlink)"
+)
+requires_symlinks = pytest.mark.skipif(
+    not _can_create_symlinks(), reason=_SYMLINK_SKIP_REASON
+)
 
 
 
@@ -40,32 +71,34 @@ def test_tiny_builder_manifest_relative_and_preflight_pass(tmp_path):
     ner, assertion, kb, dense, bge = _artifacts(tmp_path)
     out=tmp_path/'bundle'
     build_submission_bundle.main(['--code-root',str(_clean_code_root(tmp_path)), '--ner-model',str(ner),'--assertion-model',str(assertion),'--rxnorm-kb',str(kb),'--rxnorm-dense-index',str(dense),'--bge-model',str(bge),'--output',str(out)])
-    manifest=json.loads((out/'champion_manifest.json').read_text())
+    manifest=json.loads((out/'champion_manifest.json').read_text(encoding="utf-8"))
     for key in ['ner','assertion','rxnorm','dense_index','bge']:
         assert not Path(manifest[key]['path']).is_absolute()
         assert 'source_path' not in manifest[key]
         assert str(tmp_path) not in json.dumps(manifest[key])
-    inventory=json.loads((out/'artifact_inventory.json').read_text())
+    inventory=json.loads((out/'artifact_inventory.json').read_text(encoding="utf-8"))
     assert str(tmp_path) not in json.dumps(inventory)
     assert not any(p.is_symlink() for p in out.rglob('*'))
     report=tmp_path/'preflight.json'
     submission_preflight.main(['--bundle-root',str(out),'--manifest',str(out/'champion_manifest.json'),'--output',str(report)])
     submission_preflight.main(['--bundle-root',str(out),'--manifest',str(out/'champion_manifest.json'),'--output',str(tmp_path/'preflight2.json')])
 
+@requires_symlinks
 def test_materialize_hf_snapshot_dereferences_and_broken_link_fails(tmp_path):
     blobs=tmp_path/'blobs'; snap=tmp_path/'snap'; blobs.mkdir(); snap.mkdir()
     (blobs/'model.safetensors').write_bytes(b'w'); (snap/'model.safetensors').symlink_to(blobs/'model.safetensors')
-    (snap/'config.json').write_text('{}'); (snap/'tokenizer.json').write_text('{}')
+    (snap/'config.json').write_text('{}', encoding="utf-8"); (snap/'tokenizer.json').write_text('{}', encoding="utf-8")
     out=tmp_path/'mat'
     materialize_hf_snapshot.main(['--source',str(snap),'--output',str(out)])
     assert not any(p.is_symlink() for p in out.rglob('*'))
-    broken=tmp_path/'broken'; broken.mkdir(); (broken/'config.json').write_text('{}'); (broken/'tokenizer.json').write_text('{}'); (broken/'model.safetensors').symlink_to(tmp_path/'nope')
+    broken=tmp_path/'broken'; broken.mkdir(); (broken/'config.json').write_text('{}', encoding="utf-8"); (broken/'tokenizer.json').write_text('{}', encoding="utf-8"); (broken/'model.safetensors').symlink_to(tmp_path/'nope')
     with pytest.raises(FileNotFoundError):
         materialize_hf_snapshot.main(['--source',str(broken),'--output',str(tmp_path/'bad')])
 
+@requires_symlinks
 def test_builder_rejects_symlink_snapshot_with_guidance(tmp_path):
     ner, assertion, kb, dense, bge = _artifacts(tmp_path)
-    linked=tmp_path/'linked_bge'; linked.mkdir(); (linked/'config.json').write_text('{}'); (linked/'tokenizer.json').write_text('{}'); (linked/'model.safetensors').symlink_to(bge/'model.safetensors')
+    linked=tmp_path/'linked_bge'; linked.mkdir(); (linked/'config.json').write_text('{}', encoding="utf-8"); (linked/'tokenizer.json').write_text('{}', encoding="utf-8"); (linked/'model.safetensors').symlink_to(bge/'model.safetensors')
     with pytest.raises(ValueError, match='materialize_hf_snapshot'):
         build_submission_bundle.main(['--code-root',str(_clean_code_root(tmp_path)), '--ner-model',str(ner),'--assertion-model',str(assertion),'--rxnorm-kb',str(kb),'--rxnorm-dense-index',str(dense),'--bge-model',str(linked),'--output',str(tmp_path/'bundle')])
 
@@ -79,5 +112,5 @@ def test_dry_run_code_inventory_matches_real_code_inventory(tmp_path):
     dry=json.loads(buf.getvalue())
     out=tmp_path/'bundle'
     build_submission_bundle.main(['--code-root',str(code_root), '--ner-model',str(ner),'--assertion-model',str(assertion),'--rxnorm-kb',str(kb),'--rxnorm-dense-index',str(dense),'--bge-model',str(bge),'--output',str(out)])
-    inv=json.loads((out/'artifact_inventory.json').read_text())
+    inv=json.loads((out/'artifact_inventory.json').read_text(encoding="utf-8"))
     assert dry['components']['code']['file_count'] == inv['components']['code']['file_count'] - 1  # run_submission.py wrapper added only in real copy
