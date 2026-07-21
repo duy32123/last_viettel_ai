@@ -175,7 +175,7 @@ class DenseAliasIndex:
         if not all(math.isfinite(float(x)) for x in qvec) or abs(norm-1.0)>1e-4: raise ValueError('query vector must be finite and L2-normalized')
         scores=self._scores(qvec); n=len(self.entries); k=min(max(1, int(top_k)), n)
         alias_k=min(n, max(k, k*5))
-        if np is not None and hasattr(scores, 'shape') and n>alias_k:
+        if np is not None and hasattr(scores, 'shape'):
             idxs=np.argpartition(-scores, alias_k-1)[:alias_k]
             order=sorted((int(i) for i in idxs), key=lambda i:(-float(scores[i]), self.entries[i].code, self.entries[i].alias))
         else:

@@ -156,7 +156,13 @@ def test_save_dense_index_prefers_npy_when_numpy_available(tmp_path):
     save_dense_index(DenseAliasIndex.build(recs, enc, include_unverified=True), tmp_path, manifest)
     if dense_mod.np is not None:
         assert (tmp_path/'embeddings.npy').exists()
-    assert load_dense_index(tmp_path, {'model_name':'test','kb_checksum':'x'}).vectors
+    loaded = load_dense_index(tmp_path, {'model_name':'test','kb_checksum':'x'})
+    # With numpy available, vectors are kept as a matrix (mmap-friendly) rather
+    # than materialized into `.vectors`; assert on the usable index state instead.
+    if dense_mod.np is not None:
+        assert loaded.matrix is not None and loaded._dim() == 4
+    else:
+        assert loaded.vectors
 
 
 def test_mock_reranker_batching_tie_and_membership_unchanged():
