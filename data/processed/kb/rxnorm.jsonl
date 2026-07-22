@@ -1,0 +1,1 @@
+{"code": "17767", "metadata": {"input_file": "tests/fixtures/kb/rxnorm_fixture.csv"}, "normalized_names": ["amlodipine", "amlodipine besylate"], "preferred_name": "Amlodipine", "source": "rxnorm_fixture", "synonyms": ["amlodipine besylate"], "terminology": "RxNorm", "terminology_version": "fixture-2026", "verified": true}

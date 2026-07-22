@@ -1,0 +1,44 @@
+{
+  "production": true,
+  "runtime": {
+    "device": "auto",
+    "low_vram_mode": true
+  },
+  "ner": {
+    "backend": "llm_hybrid",
+    "model_path": null,
+    "adapter_path": null,
+    "mock": false,
+    "max_new_tokens": 4096,
+    "max_chunk_chars": 12000,
+    "chunk_overlap_chars": 512
+  },
+  "assertion": {
+    "source": "ner",
+    "mock": false
+  },
+  "rxnorm": {
+    "kb_dir": null,
+    "dense_index_dir": null,
+    "bge_model_path": null,
+    "retrieval_mode": "bge_dense",
+    "include_unverified": false,
+    "strict": true,
+    "top_k": 1,
+    "use_reranker": false,
+    "model_name": "BAAI/bge-m3",
+    "model_revision": "main",
+    "batch_size": 16,
+    "max_length": 8192
+  },
+  "icd10": {
+    "kb_dir": null,
+    "include_unverified": false,
+    "require": true,
+    "top_k": 1
+  },
+  "diagnostics": {
+    "report_path": "artifacts/pipeline_llm_challenger_report.json"
+  },
+  "official_evaluation": false
+}

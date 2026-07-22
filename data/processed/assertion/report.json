@@ -1,0 +1,172 @@
+{
+  "record_counts": {
+    "train": 3305,
+    "dev": 709,
+    "test": 709
+  },
+  "entity_example_counts": {
+    "train": {
+      "TRIỆU_CHỨNG": 856,
+      "CHẨN_ĐOÁN": 661,
+      "TÊN_XÉT_NGHIỆM": 661,
+      "KẾT_QUẢ_XÉT_NGHIỆM": 661,
+      "THUỐC": 661
+    },
+    "dev": {
+      "TRIỆU_CHỨNG": 184,
+      "CHẨN_ĐOÁN": 142,
+      "TÊN_XÉT_NGHIỆM": 142,
+      "KẾT_QUẢ_XÉT_NGHIỆM": 142,
+      "THUỐC": 141
+    },
+    "test": {
+      "TRIỆU_CHỨNG": 184,
+      "CHẨN_ĐOÁN": 142,
+      "TÊN_XÉT_NGHIỆM": 142,
+      "KẾT_QUẢ_XÉT_NGHIỆM": 142,
+      "THUỐC": 141
+    }
+  },
+  "label_positive_counts": {
+    "train": {
+      "isNegated": 1321,
+      "isFamily": 1487,
+      "isHistorical": 1487
+    },
+    "dev": {
+      "isNegated": 283,
+      "isFamily": 317,
+      "isHistorical": 317
+    },
+    "test": {
+      "isNegated": 283,
+      "isFamily": 317,
+      "isHistorical": 317
+    }
+  },
+  "label_negative_counts": {
+    "train": {
+      "isNegated": 2179,
+      "isFamily": 2013,
+      "isHistorical": 2013
+    },
+    "dev": {
+      "isNegated": 468,
+      "isFamily": 434,
+      "isHistorical": 434
+    },
+    "test": {
+      "isNegated": 468,
+      "isFamily": 434,
+      "isHistorical": 434
+    }
+  },
+  "combination_counts": {
+    "train": {
+      "NONE": 691,
+      "isNegated": 496,
+      "isFamily": 496,
+      "isHistorical": 496,
+      "isFamily+isHistorical": 496,
+      "isNegated+isHistorical": 330,
+      "isNegated+isFamily": 330,
+      "isNegated+isFamily+isHistorical": 165
+    },
+    "dev": {
+      "NONE": 150,
+      "isNegated": 107,
+      "isFamily": 106,
+      "isHistorical": 106,
+      "isFamily+isHistorical": 106,
+      "isNegated+isHistorical": 71,
+      "isNegated+isFamily": 71,
+      "isNegated+isFamily+isHistorical": 34
+    },
+    "test": {
+      "NONE": 150,
+      "isNegated": 107,
+      "isFamily": 106,
+      "isHistorical": 106,
+      "isFamily+isHistorical": 106,
+      "isNegated+isHistorical": 71,
+      "isNegated+isFamily": 71,
+      "isNegated+isFamily+isHistorical": 34
+    }
+  },
+  "template_families": {
+    "train": [
+      "train_combo",
+      "train_family",
+      "train_history",
+      "train_negation",
+      "train_none"
+    ],
+    "dev": [
+      "synthetic_dev_counterfactual",
+      "synthetic_dev_scope",
+      "synthetic_dev_section"
+    ],
+    "test": [
+      "synthetic_test_counterfactual",
+      "synthetic_test_scope",
+      "synthetic_test_section"
+    ]
+  },
+  "slice_counts": {
+    "train": {
+      "multi_entity_scope": 195,
+      "scope": 447,
+      "family": 446,
+      "section": 446,
+      "family_historical": 447,
+      "neg_historical": 297,
+      "family_negated": 298,
+      "counterfactual": 446,
+      "all_three": 148,
+      "no_diacritic": 135
+    },
+    "dev": {
+      "multi_entity_scope": 42,
+      "scope": 95,
+      "family": 96,
+      "section": 94,
+      "family_historical": 96,
+      "neg_historical": 64,
+      "family_negated": 64,
+      "counterfactual": 98,
+      "all_three": 31,
+      "no_diacritic": 29
+    },
+    "test": {
+      "multi_entity_scope": 42,
+      "scope": 95,
+      "family": 96,
+      "section": 94,
+      "family_historical": 96,
+      "neg_historical": 64,
+      "family_negated": 64,
+      "counterfactual": 98,
+      "all_three": 31,
+      "no_diacritic": 29
+    }
+  },
+  "duplicates": {
+    "train": 0,
+    "dev": 0,
+    "test": 0
+  },
+  "leakage": false,
+  "invalid_offsets": 0,
+  "synthetic_gold_flags": {
+    "train": {
+      "(False, False)": 3305
+    },
+    "dev": {
+      "(False, False)": 709
+    },
+    "test": {
+      "(False, False)": 709
+    }
+  },
+  "audit_pending": 120
+}

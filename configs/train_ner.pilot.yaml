@@ -1,0 +1,33 @@
+{
+  "model_name": "FacebookAI/xlm-roberta-large",
+  "train_path": "data/processed/train.combined.jsonl",
+  "dev_path": "data/processed/dev.jsonl",
+  "output_dir": "checkpoints/ner_xlmr_large_pilot",
+  "data_gate_config": "configs/data_gate.smoke.yaml",
+  "max_length": 256,
+  "stride": 64,
+  "learning_rate": 2e-5,
+  "warmup_ratio": 0.1,
+  "weight_decay": 0.01,
+  "max_steps": 30,
+  "eval_steps": 10,
+  "save_steps": 10,
+  "logging_steps": 1,
+  "save_total_limit": 2,
+  "batch_size": 1,
+  "per_device_train_batch_size": 1,
+  "per_device_eval_batch_size": 1,
+  "gradient_accumulation_steps": 16,
+  "gradient_checkpointing": true,
+  "seed": 13,
+  "fp16": true,
+  "bf16": false,
+  "metric_for_best_model": "strict_span_f1",
+  "early_stopping_patience": 2,
+  "resume_from_checkpoint": null,
+  "metadata": {
+    "experimental_pilot": true,
+    "synthetic_dev": true,
+    "official_evaluation": false
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "seed": 83,
+  "target_entity_examples": {
+    "train": 3500,
+    "dev": 600,
+    "test": 600
+  },
+  "dev_test_min_positive_per_label": 120,
+  "dev_test_min_negative_per_label": 120,
+  "dev_test_min_none": 150,
+  "important_pair_combo_min": 30,
+  "all_three_min": 20,
+  "all_three_max_fraction": 0.05,
+  "output_dir": "data/processed/assertion",
+  "audit_path": "data/annotation/assertion_audit.todo.jsonl",
+  "synthetic_gold_evaluation": false,
+  "official_evaluation": false
+}

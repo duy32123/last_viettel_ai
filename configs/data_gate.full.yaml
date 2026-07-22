@@ -1,0 +1,10 @@
+{
+  "mode": "full",
+  "min_train_documents": 10,
+  "min_dev_documents": 4,
+  "min_entities_per_type_train": 1,
+  "min_entities_per_type_dev": 1,
+  "require_non_synthetic_source": true,
+  "require_gold_dev": true,
+  "forbid_synthetic_test_as_official_eval": true
+}

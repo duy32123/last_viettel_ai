@@ -1,0 +1,22 @@
+{
+  "counts_by_type": {},
+  "entity_count_by_type": {},
+  "record_count_by_type": {},
+  "status_counts": {},
+  "source_label_confusion": {},
+  "confidence_distribution": {},
+  "method_confidence": {},
+  "qwen_agreement": {},
+  "unique_surface_forms_by_type": {},
+  "top_mentions": {},
+  "examples": {},
+  "rejected": 0,
+  "invalid": 0,
+  "class_imbalance_ratio": null,
+  "qwen_processed": 0,
+  "qwen_cache_hits": 0,
+  "qwen_batches": 0,
+  "effective_batch_size": 0,
+  "invalid_offsets": 0,
+  "duplicate_leakage": "checked_train_only_no_dev_test_inputs"
+}

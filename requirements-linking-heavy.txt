@@ -1,0 +1,2 @@
+FlagEmbedding>=1.2.11
+# Install torch using the runtime/Colab CUDA image; do not downgrade preinstalled torch/torchvision/torchaudio.

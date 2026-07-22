@@ -1,0 +1,57 @@
+[
+  {
+    "text": "đau ngực",
+    "type": "TRIỆU_CHỨNG",
+    "position": [
+      15,
+      23
+    ],
+    "assertions": [
+      "isNegated"
+    ]
+  },
+  {
+    "text": "tăng huyết áp",
+    "type": "CHẨN_ĐOÁN",
+    "position": [
+      45,
+      58
+    ],
+    "assertions": [
+      "isFamily",
+      "isHistorical"
+    ],
+    "candidates": []
+  },
+  {
+    "text": "metformin 500 mg",
+    "type": "THUỐC",
+    "position": [
+      76,
+      92
+    ],
+    "assertions": [
+      "isFamily",
+      "isHistorical"
+    ],
+    "candidates": [
+      "6809"
+    ]
+  },
+  {
+    "text": "HbA1c",
+    "type": "TÊN_XÉT_NGHIỆM",
+    "position": [
+      105,
+      110
+    ]
+  },
+  {
+    "text": "8.1%",
+    "type": "KẾT_QUẢ_XÉT_NGHIỆM",
+    "position": [
+      111,
+      115
+    ]
+  }
+]

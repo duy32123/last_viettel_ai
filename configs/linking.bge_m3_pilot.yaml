@@ -1,0 +1,28 @@
+{
+  "kb_dir": "data/processed/linking_kb_auxiliary",
+  "index_dir": "data/processed/linking_index_hf_auxiliary",
+  "dense_index_dir": "data/processed/linking_dense_bge_m3_auxiliary",
+  "production": false,
+  "include_unverified": true,
+  "top_k": 20,
+  "mode": "hybrid_rrf",
+  "model_name": "BAAI/bge-m3",
+  "model_revision": "main",
+  "batch_size": 16,
+  "max_length": 8192,
+  "use_bge": true,
+  "use_reranker": true,
+  "official_evaluation": false,
+  "reranker_model_name": "BAAI/bge-reranker-v2-m3",
+  "reranker_model_revision": "main",
+  "reranker_batch_size": 16,
+  "reranker_max_length": 8192,
+  "candidate_strategy": "auto_dev",
+  "blend_weights": [
+    0.0,
+    0.25,
+    0.5,
+    0.75,
+    1.0
+  ]
+}

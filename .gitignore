@@ -1,0 +1,27 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+data/raw/
+data/cache/
+cache/
+checkpoints/
+models/
+model_weights/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Phase 5F generated corpus (rebuild locally after audit)
+data/processed/train.v2.balanced.jsonl
+
+# Phase 5G generated lab-pair repair corpus (rebuild locally after audit)
+data/processed/train.v2_1.lab_repair.jsonl
+
+# Phase 5H generated negative repair corpus (rebuild locally after audit)
+data/processed/train.v2_2.negative_repair.jsonl
+
+# Phase 6A generated assertion corpora (rebuild locally)
+data/processed/assertion/train.jsonl
+data/processed/assertion/dev.jsonl
+data/processed/assertion/test.jsonl

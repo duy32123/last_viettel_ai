@@ -1,0 +1,5 @@
+Bệnh O
+nhân O
+ho B-SYMPTOM_AND_DISEASE
+khan I-SYMPTOM_AND_DISEASE
+. O

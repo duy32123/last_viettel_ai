@@ -1,0 +1,8 @@
+{
+  "output_dir": "data/processed/linking_kb",
+  "production": true,
+  "sources": [
+    {"name":"official_icd10_local","kind":"icd_official","terminology":"ICD-10","version":"user-provided","path":"data/raw/icd10/official_icd10.csv","verified":true,"field_map":{"code":"code","title":"title","aliases":"aliases","parent":"parent","version":"version","language":"language"}},
+    {"name":"rxnorm_current_prescribable","kind":"rxnorm_rrf","version":"user-provided-current","path":"data/raw/rxnorm/RxNorm_full_prescribe_current.zip","verified":true,"source_url":"https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html"}
+  ]
+}

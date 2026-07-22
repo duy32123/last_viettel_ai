@@ -1,0 +1,13 @@
+[
+  {
+    "text": "đau ngực",
+    "type": "TRIỆU_CHỨNG",
+    "position": [
+      35,
+      43
+    ],
+    "assertions": [
+      "isNegated"
+    ]
+  }
+]
