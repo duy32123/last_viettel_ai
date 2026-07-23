@@ -25,3 +25,8 @@ data/processed/train.v2_2.negative_repair.jsonl
 data/processed/assertion/train.jsonl
 data/processed/assertion/dev.jsonl
 data/processed/assertion/test.jsonl
+
+# Keep source model packages tracked while ignoring heavyweight model artifacts above.
+!src/models/
+!src/models/**/
+!src/models/**/*.py

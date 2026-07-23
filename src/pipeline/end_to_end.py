@@ -11,6 +11,7 @@ from src.linking.normalization import normalize_mention, normalize_text
 from src.linking.retrieval import LexicalIndex, kb_paths_checksum, load_lexical_index
 from src.models.assertion.inference import load_thresholds, predict_assertions
 from src.models.ner.inference import finalize_predictions, predict_with_model
+from src.models.llm_hybrid.extractor import LLMHybridExtractor
 
 ALLOWED_KEYS=("text","type","position","assertions","candidates")
 ASSERTION_ORDER=("isNegated","isFamily","isHistorical")
@@ -45,7 +46,9 @@ def _validate_span(text: str, ent: dict[str,Any]) -> dict[str,Any] | None:
     s,e=int(pos[0]),int(pos[1])
     if not (0 <= s < e <= len(text)): return None
     if text[s:e] != ent.get('text', text[s:e]): return None
-    return {'text':text[s:e], 'type':ent['type'], 'position':[s,e], 'score':float(ent.get('score',0.0))}
+    row={'text':text[s:e], 'type':ent['type'], 'position':[s,e], 'score':float(ent.get('score',0.0))}
+    if isinstance(ent.get('assertions'), list): row['assertions']=ent['assertions']
+    return row
 
 
 def _dedupe_entities(text: str, spans: list[dict[str,Any]]) -> tuple[list[dict[str,Any]], int, int]:
@@ -102,13 +105,13 @@ class EndToEndPipeline:
     def __init__(self, cfg: dict[str,Any]):
         self.cfg=cfg
         self.report={'documents':0,'entities_by_type':Counter(),'assertions_by_label':Counter(),'invalid_offsets':0,'dropped_spans':0,'rxnorm_linking_coverage':0.0,'icd_linking_coverage':0.0,'verified_candidate_count':0,'unverified_candidate_count':0,'candidate_cache_hits':0,'medication_entity_count':0,'unique_medication_query_count':0,'latency':Counter(),'model_metadata':{},'kb':{},'official_production_blockers':[],'executed_backends':[],'low_vram_mode_executed':False,'stage_release_events':[],'official_evaluation':False,'production_runtime_verified':False}
-        self._ner_model=None; self._ner_tokenizer=None; self._assertion_model=None; self._assertion_tokenizer=None; self._assertion_thresholds=None
+        self._ner_model=None; self._ner_tokenizer=None; self._llm_hybrid=None; self._assertion_model=None; self._assertion_tokenizer=None; self._assertion_thresholds=None
         self._rx_index=None; self._rx_dense=None; self._rx_encoder=None; self._rx_cache={}; self._icd_records=None
         self._validate_artifacts()
     def _validate_artifacts(self):
         prod=bool(self.cfg.get('production', False)); ner=self.cfg.get('ner',{}); assertion=self.cfg.get('assertion',{}); rx=self.cfg.get('rxnorm',{})
         if prod and not ner.get('mock') and not ner.get('model_path'): raise FileNotFoundError('NER checkpoint is required in production')
-        if prod and not assertion.get('mock') and not assertion.get('model_path'): raise FileNotFoundError('assertion checkpoint is required in production')
+        if prod and assertion.get('source') != 'ner' and not assertion.get('mock') and not assertion.get('model_path'): raise FileNotFoundError('assertion checkpoint is required in production')
         if self.cfg.get('submission_mode') and (ner.get('mock') or assertion.get('mock')): raise RuntimeError('mock backends are forbidden in submission mode')
         if prod and rx.get('strict', True):
             if not rx.get('kb_dir'): raise FileNotFoundError('official RxNorm KB is required in strict production mode')
@@ -124,6 +127,12 @@ class EndToEndPipeline:
             return torch, device, dtype
         except Exception as e:
             raise RuntimeError('torch is required for non-mock production runtime') from e
+    def _load_llm_hybrid(self):
+        if self._llm_hybrid is not None: return
+        t0=time.time(); ner=self.cfg.get('ner',{})
+        self._llm_hybrid=LLMHybridExtractor.from_config(ner)
+        self.report['model_metadata']['ner']={'backend':'llm_hybrid','model_path':_safe_model_ref(ner.get('model_path')),'adapter_path':_safe_model_ref(ner.get('adapter_path')),'model_forward_calls':0,'chunks':0,'dropped_rows':0,'dropped_overlaps':0,'load_seconds':time.time()-t0,'inference_seconds':0.0,'mock':False}
+
     def _load_ner(self):
         if self._ner_model is not None: return
         t0=time.time(); ner=self.cfg.get('ner',{})
@@ -136,6 +145,17 @@ class EndToEndPipeline:
         self.report['model_metadata']['ner']={'backend':'transformers_token_classification','model_path':_safe_model_ref(ner.get('model_path')),'model_class':self._ner_model.__class__.__name__,'tokenizer_class':self._ner_tokenizer.__class__.__name__,'device':device,'dtype':str(dtype).replace('torch.',''),'model_forward_calls':0,'chunks':0,'load_seconds':time.time()-t0,'inference_seconds':0.0,'mock':False,'model_load_count':self.report['model_metadata'].get('ner',{}).get('model_load_count',0)+1}
     def _predict_ner(self, text: str) -> list[dict[str,Any]]:
         ner=self.cfg.get('ner',{})
+        if ner.get('backend') == 'llm_hybrid':
+            self._load_llm_hybrid(); meta=self.report['model_metadata']['ner']; t0=time.time()
+            rows=self._llm_hybrid.predict(text)
+            meta['model_forward_calls'] += self._llm_hybrid.generation_calls - meta.get('_last_generation_calls',0)
+            meta['_last_generation_calls']=self._llm_hybrid.generation_calls
+            meta['chunks']=self._llm_hybrid.chunk_count
+            meta['dropped_rows']=self._llm_hybrid.dropped_rows
+            meta['dropped_overlaps']=self._llm_hybrid.dropped_overlaps
+            meta['inference_seconds'] += time.time()-t0
+            if 'ner:llm_hybrid' not in self.report['executed_backends']: self.report['executed_backends'].append('ner:llm_hybrid')
+            return [{'text':r['text'],'type':r['type'],'position':[r['start'],r['end']],'score':r.get('score',0.0),'assertions':r.get('assertions',[])} for r in rows]
         if ner.get('mock', False):
             self.report['model_metadata'].setdefault('ner', {'backend':'rule_smoke','mock':True,'model_forward_calls':0,'chunks':0})
             if 'ner:mock' not in self.report['executed_backends']: self.report['executed_backends'].append('ner:mock')
@@ -160,6 +180,9 @@ class EndToEndPipeline:
         self.report['model_metadata']['assertion']={'backend':'transformers_sequence_classification','model_class':self._assertion_model.__class__.__name__,'tokenizer_class':self._assertion_tokenizer.__class__.__name__,'thresholds_path':th_path,'device':device,'dtype':str(dtype).replace('torch.',''),'model_forward_calls':0,'example_count':0,'load_seconds':time.time()-t0,'inference_seconds':0.0,'mock':False,'model_load_count':self.report['model_metadata'].get('assertion',{}).get('model_load_count',0)+1}
     def _predict_assertions(self, text: str, entities: list[dict[str,Any]]):
         cfg=self.cfg.get('assertion',{})
+        if cfg.get('source') == 'ner':
+            if 'assertion:llm_hybrid' not in self.report['executed_backends']: self.report['executed_backends'].append('assertion:llm_hybrid')
+            return entities
         if cfg.get('mock', False):
             self.report['model_metadata'].setdefault('assertion', {'backend':'rules','mock':True,'model_forward_calls':0,'example_count':len(entities)})
             if 'assertion:mock' not in self.report['executed_backends']: self.report['executed_backends'].append('assertion:mock')
@@ -173,7 +196,7 @@ class EndToEndPipeline:
         return out
     def _release_stage(self, name):
         if not self.cfg.get('runtime',{}).get('low_vram_mode'): return
-        if name == 'ner': self._ner_model=None; self._ner_tokenizer=None
+        if name == 'ner': self._ner_model=None; self._ner_tokenizer=None; self._llm_hybrid=None
         if name == 'assertion': self._assertion_model=None; self._assertion_tokenizer=None
         if name == 'rxnorm': self._rx_encoder=None
         self.report['stage_release_events'].append(name); self.report['low_vram_mode_executed']=True
@@ -250,7 +273,7 @@ class EndToEndPipeline:
     def _link_med(self, ent: dict[str,Any], text: str) -> list[str]:
         key,_=self._med_query_key(text, ent)
         if key not in self._rx_cache: self._precompute_med_links([text], [[ent]])
-        return list(self._rx_cache.get(key, []))
+        return list(self._rx_cache.get(key, []))[:1]
     def _load_icd_records(self):
         if self._icd_records is not None: return self._icd_records
         icd=self.cfg.get('icd10',{}); kb_dir=Path(icd.get('kb_dir','')) if icd.get('kb_dir') else None
@@ -273,7 +296,7 @@ class EndToEndPipeline:
         records=self._load_icd_records()
         if not records: return []
         idx=LexicalIndex(records, include_unverified=False)
-        return [c.code for c in idx.search(ent['text'], 'CHẨN_ĐOÁN', top_k=int(self.cfg.get('icd10',{}).get('top_k',5)), use_fuzzy=False) if c.verified]
+        return [c.code for c in idx.search(ent['text'], 'CHẨN_ĐOÁN', top_k=int(self.cfg.get('icd10',{}).get('top_k',5)), use_fuzzy=False) if c.verified][:1]
     def _finalize_one(self, text, entities):
         med_total=med_hit=diag_total=diag_hit=0; final=[]
         for ent in entities:
@@ -299,7 +322,7 @@ class EndToEndPipeline:
             entities,dropped,dupes=_dedupe_entities(text, spans); self.report['dropped_spans'] += dropped + dupes; self.report['invalid_offsets'] += dropped; deduped.append(entities)
         t=time.time(); asserted=[]
         for text,ents in zip(texts,deduped):
-            eligible=[{k:v for k,v in e.items() if k in {'text','type','position'}} for e in ents if e.get('type') in ASSERTION_TYPES]
+            eligible=[{k:v for k,v in e.items() if k in {'text','type','position','assertions'}} for e in ents if e.get('type') in ASSERTION_TYPES]
             pred_by_pos={tuple(e['position']):e for e in self._predict_assertions(text, eligible)}
             merged=[]
             for e in ents:
@@ -319,7 +342,9 @@ class EndToEndPipeline:
         if prod and self.report['entities_by_type'].get('THUỐC',0): rx_ok=meta.get('rxnorm',{}).get('backend')=='bge_dense' and meta.get('rxnorm',{}).get('dense_query_encode_calls',0)>0 and meta.get('rxnorm',{}).get('dense_search_calls',0)>0
         self.report['production_runtime_verified']=bool(prod and nonmock_ok and ner_ok and assertion_ok and rx_ok and self.report['unverified_candidate_count']==0 and self.report['invalid_offsets']==0)
     def serializable_report(self):
-        out=dict(self.report); out['entities_by_type']=dict(out['entities_by_type']); out['assertions_by_label']=dict(out['assertions_by_label']); out['latency']=dict(out['latency'])
+        out=dict(self.report);
+        if 'ner' in out.get('model_metadata',{}): out['model_metadata']['ner'].pop('_last_generation_calls', None)
+        out['entities_by_type']=dict(out['entities_by_type']); out['assertions_by_label']=dict(out['assertions_by_label']); out['latency']=dict(out['latency'])
         try:
             import torch
             out['peak_vram_bytes']=torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
