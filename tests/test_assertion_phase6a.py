@@ -226,3 +226,48 @@ def test_training_argument_compatibility_report_to_none_and_trainer_tokenizer_fa
     class TrainerOld:
         def __init__(self, tokenizer=None, **kwargs): pass
     assert 'processing_class' in trainer_kwargs(TrainerNew, 1,2,3,4,'tok',6,7,[]) and 'tokenizer' in trainer_kwargs(TrainerOld, 1,2,3,4,'tok',6,7,[])
+
+def test_model_scores_calls_forward_and_uses_sigmoid_logits():
+    torch=pytest.importorskip("torch")
+    from types import SimpleNamespace
+    class Tok:
+        def __call__(self, texts, max_length=256, truncation=True, padding=True):
+            return {"input_ids":[[1,2,0],[1,2,3]][:len(texts)], "attention_mask":[[1,1,0],[1,1,1]][:len(texts)]}
+    class Model:
+        def __init__(self): self.calls=0; self.eval_called=False
+        def eval(self): self.eval_called=True
+        def parameters(self): return iter([torch.zeros(1)])
+        def __call__(self, **kwargs):
+            self.calls += 1
+            return SimpleNamespace(logits=torch.tensor([[2.0,-2.0,0.0],[-2.0,2.0,1.0]], dtype=torch.float32)[:kwargs['input_ids'].shape[0]])
+    text='Không ghi nhận đau ngực. Mẹ bệnh nhân có sốt.'
+    entities=[ent(text,'đau ngực','TRIỆU_CHỨNG'), ent(text,'sốt','TRIỆU_CHỨNG')]
+    model=Model(); scores=_model_scores(text, entities, model, Tok(), batch_size=2)
+    assert model.eval_called and model.calls == 1
+    assert scores[0][0] > scores[0][1]
+    assert scores[1][1] > scores[1][0]
+
+
+def test_threshold_tuning_uses_dev_scores_not_fixed_values():
+    y_true=[[1,0,0],[0,1,0],[0,0,1],[0,0,0],[1,1,0]]
+    y_score=[[.91,.2,.1],[.55,.82,.1],[.54,.2,.73],[.56,.1,.1],[.88,.76,.2]]
+    tuned=tune_thresholds(y_true,y_score)
+    assert any(abs(v['threshold']-0.5) > 1e-9 for v in tuned.values())
+    assert all(0.0 <= v['precision'] <= 1.0 and 0.0 <= v['recall'] <= 1.0 and 0.0 <= v['f1'] <= 1.0 for v in tuned.values())
+
+
+def test_float_multilabel_collator_pads_and_returns_float32_labels():
+    torch=pytest.importorskip("torch")
+    class Tok:
+        def pad(self, features, padding=True, return_tensors='pt'):
+            max_len=max(len(f['input_ids']) for f in features)
+            return {
+                'input_ids':torch.tensor([f['input_ids']+[0]*(max_len-len(f['input_ids'])) for f in features], dtype=torch.long),
+                'attention_mask':torch.tensor([f['attention_mask']+[0]*(max_len-len(f['attention_mask'])) for f in features], dtype=torch.long),
+            }
+    batch=FloatMultilabelCollator(Tok())([
+        {'input_ids':[1,2], 'attention_mask':[1,1], 'labels':[1,0,0]},
+        {'input_ids':[1,2,3], 'attention_mask':[1,1,1], 'labels':[0,1,0]},
+    ])
+    assert batch['input_ids'].shape == (2,3)
+    assert batch['labels'].dtype == torch.float32

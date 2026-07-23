@@ -28,6 +28,30 @@ jobs:
       - name: Run unit tests
         run: python -m pytest -q -m "not integration"
 
+  model-utility-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install smoke test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Run PyTorch model utility smoke tests
+        run: |
+          set -o pipefail
+          python -m pytest -q --strict-markers \
+            tests/test_assertion_phase6a.py::test_model_scores_calls_forward_and_uses_sigmoid_logits \
+            tests/test_assertion_phase6a.py::test_threshold_tuning_uses_dev_scores_not_fixed_values \
+            tests/test_assertion_phase6a.py::test_float_multilabel_collator_pads_and_returns_float32_labels \
+            tests/test_ner_phase5a.py::test_predict_with_model_uses_softmax_span_confidence_not_constant_one | tee /tmp/model-utility-smoke.log
+          grep -q "4 passed" /tmp/model-utility-smoke.log
+          ! grep -qi "skipped" /tmp/model-utility-smoke.log
+
+
   integration:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_integration == 'true' }}
     runs-on: ubuntu-latest

@@ -5,7 +5,7 @@ data/raw/
 data/cache/
 cache/
 checkpoints/
-models/
+/models/
 model_weights/
 *.pt
 *.pth
