@@ -72,7 +72,14 @@ def predict_with_model(text: str, tokenizer: Any, model: Any, *, max_length: int
         device=next(model.parameters()).device
         with torch.no_grad():
             out=model(input_ids=torch.tensor([input_ids], device=device), attention_mask=torch.tensor([attention], device=device))
-        pred=out.logits.argmax(dim=-1)[0].detach().cpu().tolist()
+        probs=torch.softmax(out.logits, dim=-1)[0].detach().cpu()
+        pred=probs.argmax(dim=-1).tolist()
+        token_conf=probs.max(dim=-1).values.tolist()
         spans=decode_feature_spans({'text':text,'offset_mapping':offsets}, pred, ID2LABEL)
-        chunks.append([{**sp,'score':1.0} for sp in spans])
+        scored=[]
+        for sp in spans:
+            idxs=[j for j,(a,b) in enumerate(offsets) if a != b and max(a,sp['start']) < min(b,sp['end'])]
+            score=sum(token_conf[j] for j in idxs)/len(idxs) if idxs else 0.0
+            scored.append({**sp,'score':float(score)})
+        chunks.append(scored)
     return finalize_predictions(text, chunks)

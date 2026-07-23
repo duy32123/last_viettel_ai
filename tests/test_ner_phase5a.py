@@ -151,3 +151,23 @@ def test_merge_conflicting_types_same_boundary_keeps_highest_score():
     ])
     assert len(merged) == 1
     assert merged[0]["type"] == "CHẨN_ĐOÁN"
+
+def test_predict_with_model_uses_softmax_span_confidence_not_constant_one():
+    torch=pytest.importorskip("torch")
+    from types import SimpleNamespace
+    from src.models.ner.inference import predict_with_model
+    class Tok:
+        def __call__(self, text, return_offsets_mapping=True, truncation=True, max_length=16, stride=4, return_overflowing_tokens=True, padding=False):
+            return {'input_ids':[0,1,2,3,0], 'attention_mask':[1,1,1,1,1], 'offset_mapping':[(0,0),(0,1),(1,2),(2,3),(0,0)]}
+    class Model:
+        def parameters(self): return iter([torch.zeros(1)])
+        def __call__(self, **kwargs):
+            logits=torch.full((1,5,len(LABEL2ID)), -5.0)
+            logits[0,0,LABEL2ID['O']]=5.0; logits[0,4,LABEL2ID['O']]=5.0
+            logits[0,1,LABEL2ID['B-TRIỆU_CHỨNG']]=3.0
+            logits[0,2,LABEL2ID['I-TRIỆU_CHỨNG']]=1.0
+            logits[0,3,LABEL2ID['L-TRIỆU_CHỨNG']]=2.0
+            return SimpleNamespace(logits=logits)
+    rows=predict_with_model('sốt', Tok(), Model())
+    assert rows and rows[0]['text'] == 'sốt'
+    assert 0.0 < rows[0]['score'] < 1.0
