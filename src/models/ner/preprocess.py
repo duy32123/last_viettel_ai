@@ -42,15 +42,22 @@ def preprocess_records(records, tokenizer, max_length=256, stride=64):
     for rec in records:
         ents=validate_entities(rec, stats); text=rec['text']
         enc=tokenizer(text, return_offsets_mapping=True, truncation=True, max_length=max_length, stride=stride, return_overflowing_tokens=True, padding=False)
-        for idx,offsets in enumerate(enc['offset_mapping']):
-            f={k:enc[k][idx] for k in ('input_ids','attention_mask','offset_mapping') if k in enc}
+        offsets_obj=enc['offset_mapping']
+        batched=bool(offsets_obj and isinstance(offsets_obj[0], (list, tuple)) and offsets_obj[0] and isinstance(offsets_obj[0][0], (list, tuple)))
+        count=len(offsets_obj) if batched else 1
+        for idx in range(count):
+            f={}
+            for k in ('input_ids','attention_mask','offset_mapping'):
+                if k in enc: f[k]=enc[k][idx] if batched else enc[k]
             f.update({'record_id':rec.get('id'),'text':text,'gold_entities':ents})
+            offsets=f['offset_mapping']
             f['labels']=_label_sequence(offsets, ents, stats)
             features.append(f)
     return features, stats
 
-def decode_feature_spans(feature, label_ids):
-    labs=[ID2LABEL.get(int(i),'O') if int(i) != -100 else 'O' for i in label_ids]
+def decode_feature_spans(feature, label_ids, id2label=None):
+    lookup = ({int(k): v for k, v in id2label.items()} if id2label is not None else ID2LABEL)
+    labs=[lookup.get(int(i),'O') if int(i) != -100 else 'O' for i in label_ids]
     spans=labels_to_spans(feature['offset_mapping'], labs, len(feature['text']))
     out=[]
     for s in spans:
@@ -63,3 +70,13 @@ def read_jsonl(path):
     import json
     from pathlib import Path
     return [json.loads(l) for l in Path(path).read_text(encoding='utf-8').splitlines() if l.strip()]
+
+
+def normalize_predicted_span(text, start, end):
+    start=max(0,int(start)); end=min(len(text),int(end))
+    while start < end and text[start].isspace(): start += 1
+    while end > start and text[end-1].isspace(): end -= 1
+    # Trim trailing punctuation, but keep medical symbols/units like %, +, / in-token.
+    while end > start and text[end-1] in '.,;:)]}': end -= 1
+    if start >= end: return None
+    return {'start':start,'end':end,'text':text[start:end]}
